@@ -1,7 +1,12 @@
 import type { DbAdapter } from "./adapter";
 
+/** Server-side key: new-style "sb_secret_…" or the legacy service_role JWT. */
+export function supabaseSecret(): string | undefined {
+  return process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+
 export function hasSupabase(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && supabaseSecret());
 }
 
 let adapter: DbAdapter | null = null;

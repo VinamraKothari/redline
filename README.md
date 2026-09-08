@@ -44,9 +44,11 @@ Open http://localhost:3000, paste a URL.
 
 | Variable | Where to find it |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Project Settings → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Project Settings → API → anon public key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → service_role key (server only, never exposed) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Project Settings → API keys → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Project Settings → API keys → **publishable** key (legacy: anon) |
+| `SUPABASE_SECRET_KEY` | Project Settings → API keys → **secret** key (legacy: service_role) — server only, never exposed |
+
+The two public values are committed in `.env.production`; only the secret key needs to be added in Vercel.
 
 Without these the app still runs, but data lives in a local JSON file and there is no realtime — fine for trying it out, not for sharing.
 
