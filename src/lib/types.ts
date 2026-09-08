@@ -1,0 +1,121 @@
+/* ─── Domain types shared by server, client and storage adapters ─────────── */
+
+export type ReviewMode = "live" | "frozen" | "upload";
+
+export interface Review {
+  id: string; // short slug used in URLs
+  url: string;
+  title: string;
+  mode: ReviewMode;
+  /** storage path of a frozen / uploaded HTML snapshot */
+  snapshot_path: string | null;
+  default_viewport: number;
+  created_by: string;
+  /** secret held by the creator's browser; unlocks owner actions */
+  owner_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Everything needed to put a pin back where it was. */
+export interface Anchor {
+  /** robust CSS path to the element the pin was dropped on */
+  selector: string | null;
+  /** offset inside that element, as a fraction of its box (0..1) */
+  fx: number;
+  fy: number;
+  /** absolute page coordinates at the time of creation (fallback) */
+  px: number;
+  py: number;
+  /** optional region (drag-to-comment) in page coordinates */
+  region?: { x: number; y: number; w: number; h: number } | null;
+  /** human readable element path, e.g. "main › section.hero › h1" */
+  element_label?: string | null;
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  url: string; // data: URL or storage URL
+  w?: number;
+  h?: number;
+}
+
+export interface Comment {
+  id: string;
+  review_id: string;
+  parent_id: string | null; // null = thread root
+  author_name: string;
+  author_color: string;
+  body: string;
+  anchor: Anchor | null; // only on thread roots
+  viewport_width: number;
+  resolved: boolean;
+  reactions: Record<string, string[]>; // emoji -> author names
+  attachments: Attachment[];
+  edited_at: string | null;
+  created_at: string;
+}
+
+export type ShapeType =
+  | "pen"
+  | "highlighter"
+  | "line"
+  | "arrow"
+  | "rect"
+  | "ellipse"
+  | "text";
+
+export interface ShapeStyle {
+  stroke: string;
+  width: number; // px
+  opacity: number; // 0..1
+  fill?: string | null;
+  fontSize?: number;
+}
+
+export interface Shape {
+  id: string;
+  review_id: string;
+  viewport_width: number;
+  type: ShapeType;
+  /** pen/highlighter: points; others: geometry */
+  data: {
+    points?: number[][]; // [x, y, pressure]
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+    x2?: number;
+    y2?: number;
+    text?: string;
+  };
+  style: ShapeStyle;
+  author_name: string;
+  z: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Viewer {
+  name: string;
+  color: string;
+  key: string; // per-tab session key
+  cursor?: { x: number; y: number } | null;
+  viewport_width?: number;
+}
+
+export const VIEWPORTS: { label: string; width: number; kind: "desktop" | "tablet" | "mobile" }[] = [
+  { label: "Desktop · 1920", width: 1920, kind: "desktop" },
+  { label: "Desktop · 1440", width: 1440, kind: "desktop" },
+  { label: "Tablet · 1024", width: 1024, kind: "tablet" },
+  { label: "Tablet · 768", width: 768, kind: "tablet" },
+  { label: "Phone · 430", width: 430, kind: "mobile" },
+  { label: "Phone · 390", width: 390, kind: "mobile" },
+  { label: "Phone · 375", width: 375, kind: "mobile" },
+];
+
+export const AUTHOR_COLORS = [
+  "#e2342b", "#2c6cf6", "#1f9d55", "#d98b0b", "#8b5cf6",
+  "#0e9aa7", "#d63384", "#6b7d2f", "#b05a1a", "#4a5568",
+];

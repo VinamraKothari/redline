@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+<title>Acme — Fixture page</title>
+<link rel="stylesheet" href="/site.css">
+<style>
+  .hero { padding: 64px 48px; background: #0f172a; color: #fff; }
+  .hero h1 { font: 700 48px/1.1 Georgia, serif; margin: 0 0 16px; letter-spacing: -0.02em; }
+  .hero p { font: 400 18px/1.6 Arial, sans-serif; max-width: 560px; color: #cbd5e1; }
+  .btn { display: inline-block; margin-top: 24px; padding: 12px 20px; border-radius: 8px; background: #e2342b; color: #fff; font: 600 14px Arial; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 48px; }
+  .card { padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; }
+  .card h3 { margin: 0 0 8px; font: 600 20px Arial; color: #111827; }
+  .card p { margin: 0; font: 400 14px/1.5 Arial; color: #6b7280; }
+  footer { padding: 32px 48px; font: 12px Arial; color: #9ca3af; }
+  .tall { height: 1400px; background: linear-gradient(#fff, #f3f4f6); }
+</style>
+<script>
+  // frame-buster that must be neutralised
+  if (window.top !== window.self) { try { window.top.location = window.self.location; } catch (e) {} }
+</script>
+</head>
+<body>
+  <header class="hero" id="hero">
+    <h1 data-testid="headline">Ship better design reviews</h1>
+    <p>Load any page, pin comments, draw on it, and inspect the type, colour and spacing.</p>
+    <a class="btn" href="/pricing.html">See pricing</a>
+    <a class="btn" href="https://example.org/ext" target="_blank">External</a>
+  </header>
+  <section class="grid">
+    <div class="card"><h3>Comments</h3><p>Anchored to elements.</p></div>
+    <div class="card"><h3>Drawing</h3><p>Pen, arrows and shapes.</p></div>
+    <div class="card"><h3>Inspect</h3><p>Fonts, colours, spacing.</p></div>
+  </section>
+  <div class="tall"></div>
+  <footer>© Acme Inc.</footer>
+  <form action="/search"><input name="q" placeholder="Search"><button>Go</button></form>
+</body>
+</html>

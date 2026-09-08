@@ -1,26 +1,138 @@
 @import "tailwindcss";
 
+/* ─── Redline design tokens ─────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* chrome */
+  --paper: #f6f5f1;        /* app background */
+  --panel: #ffffff;        /* panels, popovers */
+  --canvas: #e9e7e1;       /* canvas behind the page */
+  --line: #e3e0d8;         /* hairlines */
+  --line-strong: #cfcbc0;
+  --ink: #1c1b18;          /* primary text */
+  --ink-2: #5f5b52;        /* secondary text */
+  --ink-3: #9a958a;        /* tertiary / placeholders */
+  --hover: #f0eee8;
+  --active: #e6e3db;
+
+  /* the redline */
+  --red: #e2342b;
+  --red-ink: #b7241c;
+  --red-soft: #fdeceb;
+  --red-glow: rgba(226, 52, 43, 0.28);
+
+  /* selection / inspection (Figma-ish blue) */
+  --blue: #2c6cf6;
+  --blue-soft: rgba(44, 108, 246, 0.12);
+  --blue-fill: rgba(44, 108, 246, 0.08);
+
+  /* box model overlay */
+  --margin-fill: rgba(246, 178, 107, 0.28);
+  --padding-fill: rgba(147, 196, 125, 0.32);
+  --content-fill: rgba(111, 168, 220, 0.28);
+
+  --green: #1f9d55;
+  --amber: #d98b0b;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-pop: 0 1px 2px rgba(28, 27, 24, 0.06), 0 8px 28px -8px rgba(28, 27, 24, 0.22);
+  --shadow-pin: 0 1px 2px rgba(0,0,0,.18), 0 4px 12px -2px rgba(0,0,0,.28);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-canvas: var(--canvas);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-red: var(--red);
+  --color-red-ink: var(--red-ink);
+  --color-red-soft: var(--red-soft);
+  --color-blue: var(--blue);
+  --color-blue-soft: var(--blue-soft);
+  --color-green: var(--green);
+  --color-amber: var(--amber);
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-pin: var(--shadow-pin);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html, body { height: 100%; }
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
 }
+
+::selection { background: var(--red-soft); color: var(--red-ink); }
+
+/* utility layers */
+.canvas-grid {
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--line-strong) 0.8px, transparent 0.8px);
+  background-size: 22px 22px;
+}
+
+.hairline { box-shadow: 0 0 0 1px var(--line); }
+.mono { font-family: var(--font-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* scrollbars: quiet */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* keyboard key caps */
+.kbd {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+}
+
+/* focus rings */
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 4px; }
+input:focus-visible, textarea:focus-visible { outline: none; }
+
+/* pin pop */
+@keyframes pin-in {
+  0% { transform: scale(0.4) translateY(6px); opacity: 0; }
+  60% { transform: scale(1.08) translateY(-1px); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+.pin-in { animation: pin-in 260ms cubic-bezier(.2,.9,.3,1.2) both; }
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fade-up 160ms ease-out both; }
+
+@keyframes cursor-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--red-glow); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* dashed measurement guides */
+.measure-line { stroke: var(--red); stroke-width: 1; shape-rendering: crispEdges; }
+.measure-ext { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 3; shape-rendering: crispEdges; opacity: .8; }
+
+textarea { resize: none; }

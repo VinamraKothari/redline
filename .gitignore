@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# redline
+.data/
+test-results/
+playwright-report/
+scripts/dbg*.mjs
+scripts/shots*.mjs
+AGENTS.md
+CLAUDE.md

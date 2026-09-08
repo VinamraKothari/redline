@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Redline
 
-## Getting Started
+Design feedback on any live website. Load a page, leave Figma-style comments pinned to elements, draw on it, inspect type / colour / spacing, and share the marked-up canvas with a link.
 
-First, run the development server:
+## How it works
+
+Most sites refuse to be iframed, and even when they allow it a cross-origin frame gives no access to fonts or layout. Redline fetches the page server-side (`/api/proxy`), strips frame-blocking headers, injects a small bridge script and re-serves the page from its own origin. Stylesheets and everything they reference (fonts, images) are routed through the proxy too, so self-hosted fonts without CORS headers still render — which matters when you're checking typography.
+
+Because the page is now same-origin, the app can read the real DOM: hover box models, computed styles, distances between elements, and it can anchor comments to the element you clicked (so pins follow the layout rather than drifting).
+
+**Freeze** serialises the rendered DOM (JS-rendered content included), inlines the live stylesheets and stores the result so everyone reviews the exact same version.
+
+## Features
+
+- **Comments** — click to pin, drag for a region, threads, @mentions, emoji reactions, edit/delete, resolve/reopen, image attachments, permalinks, unread badges, `N` / `Shift+N` navigation, per-viewport pins, panel grouped into Pending / Resolved.
+- **Drawing** — pen, highlighter, line, arrow, rectangle, ellipse, text; colours, stroke widths, select/move, undo/redo; synced live.
+- **Inspect** — hover box-model overlay, typography, colours (click to copy), box model, WCAG contrast, copy CSS; `Alt` + hover to measure distances between elements; `Ctrl` / `⌘` for deep-select of the innermost element; page-wide summary of fonts, colours, spacing and headings.
+- **Viewports** — 1920 / 1440 / 1024 / 768 / 430 / 390 / 375 with a phone frame; zoom and fit.
+- **Full-screen preview** (`F`) — see the page exactly as a visitor would.
+- **Share** — review link, view-only link, comment permalinks, presence avatars and live cursors.
+- **Export** — Jira-importable CSV, Markdown, PNG of the canvas.
+
+Keyboard: `V` browse · `C` comment · `D` draw · `I` inspect · `F` full screen · `Shift+C` hide comments · `?` all shortcuts.
+
+## Stack
+
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · Radix primitives · Zustand · Supabase (Postgres, Realtime, Storage) · perfect-freehand · cheerio · Playwright.
+
+## Running locally
 
 ```bash
+npm install
+cp .env.example .env.local   # optional — without Supabase, data is kept in .data/redline.json
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000, paste a URL.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase setup (production)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a project at supabase.com.
+2. In the SQL editor, run `supabase/schema.sql`.
+3. Set these environment variables (locally in `.env.local`, on Vercel in Project → Settings → Environment Variables):
 
-## Learn More
+| Variable | Where to find it |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Project Settings → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Project Settings → API → anon public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → service_role key (server only, never exposed) |
 
-To learn more about Next.js, take a look at the following resources:
+Without these the app still runs, but data lives in a local JSON file and there is no realtime — fine for trying it out, not for sharing.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tests
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+# builds, serves a fixture site on :3999, runs the Playwright suite
+PW_CHROMIUM=/path/to/chrome bash scripts/e2e.sh
+```
 
-## Deploy on Vercel
+## Jira import
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Share → Export → **Jira CSV**, then in Jira: Settings → System → External system import → CSV. The columns Summary, Description, Issue Type, Priority, Status, Labels, Reporter, Created and Comment map automatically; `Redline URL`, `Element` and `Viewport` can go to custom fields or be skipped. Dates use Jira's default `dd/MMM/yy h:mm a` format.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Limitations
+
+- Pages behind login, aggressive bot protection, or SPAs that depend on their own origin may not render through the proxy — drop an `.html` file instead.
+- Freeze captures what is rendered at that moment (the tool scrolls the page first so lazy content loads).
+- Request bodies are capped at 4 MB (Vercel limit), which bounds uploads and freezes.
