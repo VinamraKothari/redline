@@ -16,6 +16,8 @@ import { Toasts } from "./Toasts";
 import { NamePrompt } from "./NamePrompt";
 import { useShortcuts } from "@/lib/hooks/useShortcuts";
 import { cn } from "@/lib/util";
+import { PanelRightOpen } from "lucide-react";
+import { IconButton, Tip } from "@/components/ui/primitives";
 
 export const RealtimeContext = { current: null as RealtimeHandle | null };
 
@@ -72,6 +74,17 @@ export function Workspace({
 
   useShortcuts();
 
+  // keep presence in sync when the reviewer sets / changes their name
+  useEffect(() => {
+    let prev = useStore.getState().viewer;
+    return useStore.subscribe((s) => {
+      if (s.viewer.name !== prev.name || s.viewer.color !== prev.color) {
+        prev = s.viewer;
+        RealtimeContext.current?.track({ name: s.viewer.name || "Anonymous", color: s.viewer.color });
+      }
+    });
+  }, []);
+
   return (
     <TooltipProvider>
       <div className={cn("flex h-full flex-col overflow-hidden bg-paper", fullscreen && "bg-canvas")}>
@@ -80,6 +93,15 @@ export function Workspace({
           {!fullscreen && <LeftRail />}
           <Stage />
           {!fullscreen && panel && <RightPanel />}
+          {!fullscreen && !panel && (
+            <div className="absolute right-3 top-3 z-30">
+              <Tip label="Show panel" side="left">
+                <IconButton className="bg-panel shadow-pop hairline" onClick={() => set({ panel: mode === "inspect" ? "inspect" : "comments" })}>
+                  <PanelRightOpen size={15} />
+                </IconButton>
+              </Tip>
+            </div>
+          )}
         </div>
         {mode === "draw" && !fullscreen && <DrawToolbar />}
         <Toasts />

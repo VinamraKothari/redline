@@ -3,9 +3,10 @@ import { decodeBody, detectCharset, rewriteCss, rewriteHtml } from "@/lib/proxy/
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const MAX_BYTES = 8 * 1024 * 1024;
-const TIMEOUT_MS = 12_000;
+const TIMEOUT_MS = 20_000;
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
@@ -83,7 +84,7 @@ export async function GET(req: NextRequest) {
     return errorPage(
       504,
       aborted ? "The page took too long to respond" : "The page couldn't be reached",
-      aborted ? "It didn't answer within 12 seconds. Try again, or upload the page as an HTML file." : String((e as Error).message),
+      aborted ? "It didn't answer within 20 seconds. Try again, or upload the page as an HTML file." : String((e as Error).message),
       target,
     );
   }

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: PageProps<"/r/[id]">): Promise<Metadata> {
   const { id } = await params;
   const review = await (await db()).getReview(id);
-  return { title: review ? `${review.title} — Redline` : "Redline" };
+  return { title: review ? `${review.title} — Redline` : "Redline", robots: { index: false, follow: false } };
 }
 
 export default async function ReviewPage({ params, searchParams }: PageProps<"/r/[id]">) {
