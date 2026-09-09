@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rehydrating SPA — fixture</title>
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body>
+  <main>
+    <h1 data-testid="spa-headline">Server-rendered headline</h1>
+    <p class="lede">Prices below were rendered for another region on the server.</p>
+    <p data-testid="price">$1,305</p>
+  </main>
+  <script>
+    // Simulates React recovering from a hydration mismatch: the whole <html>
+    // element is swapped for a freshly client-rendered one that works fine.
+    setTimeout(function () {
+      var html = document.createElement("html");
+      html.lang = "en";
+      html.innerHTML = document.documentElement.innerHTML.replace("$1,305", "€1,123").replace("Server-rendered headline", "Client-rendered headline");
+      document.replaceChild(html, document.documentElement);
+    }, 150);
+  </script>
+</body>
+</html>

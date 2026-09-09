@@ -48,7 +48,26 @@ async function createReview(page: Page, fixture = FIXTURE) {
   await page.waitForURL(/\/r\/[a-z0-9]+/);
   const frame = page.frameLocator('iframe[title="Page under review"]');
   if (fixture === FIXTURE) await expect(frame.locator("h1")).toHaveText("Ship better design reviews");
+  await settle(page);
   return frame;
+}
+
+/** Waits until the review iframe has stopped moving/resizing (layout settled after load). */
+async function settle(page: Page) {
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const el = document.querySelector('iframe[title="Page under review"]');
+        if (!el) return resolve(false);
+        const a = el.getBoundingClientRect();
+        setTimeout(() => {
+          const b = el.getBoundingClientRect();
+          resolve(a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height);
+        }, 250);
+      }),
+    undefined,
+    { timeout: 10_000, polling: 100 },
+  );
 }
 
 test("landing page: hero + URL box for visitors, protected pages redirect, projects once signed in", async ({ page }) => {
@@ -313,6 +332,17 @@ test("falls back to a static render when the site's scripts destroy the document
   // the toggle switches scripts back on (and the page crashes again → falls back again)
   await page.getByRole("button", { name: /Site scripts: off/ }).click();
   await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
+});
+
+test("a client re-render that swaps the <html> element is not treated as a crash", async ({ page }) => {
+  const frame = await createReview(page, FIXTURE.replace(/site\.html$/, "spa-rehydrate.html"));
+  await expect(frame.locator('[data-testid="spa-headline"]')).toHaveText("Client-rendered headline");
+  await expect(frame.locator('[data-testid="price"]')).toHaveText("€1,123");
+  await page.waitForTimeout(1500);
+  await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
+  await expect(page.getByText(/scripts crashed inside the reviewer/)).toHaveCount(0);
+  // the new root is adopted so comments can still anchor to it
+  await expect(frame.locator("html")).toHaveAttribute("data-redline", "1");
 });
 
 test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports go through the proxy", async ({ page }) => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, FolderInput, Globe, MoreHorizontal, Pencil, Snowflake, Trash2 } from "lucide-react";
+import { ExternalLink, FolderInput, Globe, ImageDown, MoreHorizontal, Pencil, Snowflake, Trash2 } from "lucide-react";
 import { Button, Dialog, DialogContent, IconButton, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
 import { api, type ProjectSummary } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
@@ -28,6 +28,20 @@ export function PageTile({
   const [renaming, setRenaming] = useState(false);
   const [moving, setMoving] = useState(false);
   const [name, setName] = useState(r.title);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function refreshPreview() {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/reviews/${r.id}/thumbnail?force=1`, { method: "POST" });
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Couldn't refresh the preview.");
+      onChanged();
+    } catch (err) {
+      onError((err as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function rename(e: React.FormEvent) {
     e.preventDefault();
@@ -60,11 +74,11 @@ export function PageTile({
         <div className="relative aspect-[16/10] w-full overflow-hidden bg-hover">
           {r.thumbnail_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={r.thumbnail_url} alt="" className="h-full w-full object-cover object-top" loading="lazy" />
+            <img src={r.thumbnail_url} alt="" className={cn("h-full w-full object-cover object-top", refreshing && "opacity-40")} loading="lazy" />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-ink-3">
               <Globe size={18} />
-              <span className="text-[11px]">Preview appears after the first visit</span>
+              <span className="text-[11px]">{refreshing ? "Rendering preview…" : "Preview appears after the first visit"}</span>
             </div>
           )}
           {r.mode === "frozen" && (
@@ -126,6 +140,9 @@ export function PageTile({
                   </MenuItem>
                   <MenuItem onSelect={() => setMoving(true)}>
                     <FolderInput size={13} /> Move to project…
+                  </MenuItem>
+                  <MenuItem onSelect={refreshPreview} disabled={refreshing}>
+                    <ImageDown size={13} /> Refresh preview
                   </MenuItem>
                 </>
               )}

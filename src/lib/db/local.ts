@@ -52,7 +52,7 @@ async function persist() {
   await writing;
 }
 
-export const localDb: DbAdapter = {
+const impl: DbAdapter = {
   /* identity */
   async getProfile(id) {
     return (await load()).profiles[id] ?? null;
@@ -91,7 +91,12 @@ export const localDb: DbAdapter = {
     delete s.projects[id];
     for (const [k, m] of Object.entries(s.members)) if (m.project_id === id) delete s.members[k];
     for (const [k, i] of Object.entries(s.invites)) if (i.project_id === id) delete s.invites[k];
-    for (const r of Object.values(s.reviews)) if (r.project_id === id) await this.deleteReview(r.id);
+    for (const r of Object.values(s.reviews)) {
+      if (r.project_id !== id) continue;
+      delete s.reviews[r.id];
+      for (const c of Object.values(s.comments)) if (c.review_id === r.id) delete s.comments[c.id];
+      for (const sh of Object.values(s.shapes)) if (sh.review_id === r.id) delete s.shapes[sh.id];
+    }
     await persist();
   },
   async listProjectsFor(userId) {
@@ -296,3 +301,45 @@ export const localDb: DbAdapter = {
     }
   },
 };
+
+/**
+ * Every call runs alone: a read-modify-write on the JSON file from two
+ * concurrent requests (e.g. a preview capture finishing while a review is
+ * being created) would otherwise drop one of the writes.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+const LOCK = path.join(DIR, "redline.lock");
+/** Cross-instance lock (Next may load this module more than once): an exclusive lock file. */
+async function withFileLock<T>(fn: () => Promise<T>): Promise<T> {
+  await fs.mkdir(DIR, { recursive: true });
+  const started = Date.now();
+  for (;;) {
+    try {
+      const h = await fs.open(LOCK, "wx");
+      await h.close();
+      break;
+    } catch {
+      if (Date.now() - started > 5000) {
+        // a crashed process left the lock behind
+        await fs.unlink(LOCK).catch(() => {});
+      } else await new Promise((r) => setTimeout(r, 8));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    await fs.unlink(LOCK).catch(() => {});
+  }
+}
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(() => withFileLock(fn), () => withFileLock(fn));
+  queue = run.catch(() => {});
+  return run;
+}
+export const localDb: DbAdapter = new Proxy(impl, {
+  get(target, prop, receiver) {
+    const v = Reflect.get(target, prop, receiver);
+    if (typeof v !== "function") return v;
+    return (...args: unknown[]) => serialized(() => (v as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+  },
+}) as DbAdapter;

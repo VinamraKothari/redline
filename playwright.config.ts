@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: "tests",
   timeout: 60_000,
   retries: 0,
+  // each review spawns a headless Chromium on the server for its preview; keep the load sane
+  workers: 2,
   // Proxied pages take a few seconds to render when several tests run at once.
   expect: { timeout: 15_000 },
   use: {

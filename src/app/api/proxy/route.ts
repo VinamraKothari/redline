@@ -1,3 +1,4 @@
+import { isBlockedHost } from "@/lib/proxy/hosts";
 import type { NextRequest } from "next/server";
 import { decodeBody, detectCharset, rewriteCss, rewriteHtml } from "@/lib/proxy/rewrite";
 import { PROXY_TARGET_HEADER, SITE_COOKIE } from "@/lib/proxy/site-cookie";
@@ -12,16 +13,6 @@ const TIMEOUT_MS = 20_000;
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
-
-function isBlockedHost(host: string): boolean {
-  const h = host.toLowerCase();
-  // Test-only escape hatch so local fixtures can be proxied in CI.
-  if (process.env.REDLINE_ALLOW_LOCAL === "1" && (h === "localhost" || h === "127.0.0.1")) return false;
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
-  if (/^127\.|^10\.|^0\.|^169\.254\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  if (h === "::1" || h.startsWith("[::1]") || h.startsWith("fc") || h.startsWith("fd")) return true;
-  return false;
-}
 
 /** Public origin of this deployment (respects Vercel's forwarded headers). */
 function appOriginOf(req: NextRequest): string {

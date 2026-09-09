@@ -174,16 +174,37 @@
   // whole document with an error screen (Next.js: <html id="__next_error__">),
   // the server-rendered markup was fine — the host reloads with scripts
   // stripped so the reviewer at least gets the static render.
+  //
+  // A replaced <html> alone is NOT a crash: React recovers from a hydration
+  // mismatch (e.g. prices rendered in a different currency for our server's
+  // location) by re-rendering the whole tree client-side, which swaps the root
+  // element for a fresh, fully working one. Only treat it as a crash when the
+  // new document is an error page or has lost almost all of its content.
   let reported = false;
-  const root0 = document.documentElement;
+  let root0 = document.documentElement;
+  let textLen0 = 0;
+  const textLen = () => (document.body?.textContent || "").replace(/\s+/g, " ").length;
   const check = () => {
     if (reported) return;
     const root = document.documentElement;
-    const replaced = root !== root0 || !root.hasAttribute("data-redline");
     const nextError = root.id === "__next_error__" || !!document.getElementById("__next_error__");
-    if (replaced || nextError) {
+    const replaced = root !== root0 || !root.hasAttribute("data-redline");
+    if (nextError) {
       reported = true;
-      post({ type: "crashed", reason: nextError ? "next-error" : "document-replaced" });
+      post({ type: "crashed", reason: "next-error" });
+      return;
+    }
+    if (replaced) {
+      const len = textLen();
+      if (len < 200 || len < textLen0 * 0.25) {
+        reported = true;
+        post({ type: "crashed", reason: "document-replaced" });
+        return;
+      }
+      // recovered by a client re-render: adopt the new root and carry on
+      root.setAttribute("data-redline", "1");
+      root0 = root;
+      textLen0 = Math.max(textLen0, len);
     }
   };
   const start = Date.now();
@@ -194,7 +215,10 @@
 
   // Let the host know we're alive as early as possible, and again when ready.
   post({ type: "bridge-hello", url: originalUrl, finalUrl });
-  window.addEventListener("DOMContentLoaded", () => post({ type: "dom-ready", title: document.title }));
+  window.addEventListener("DOMContentLoaded", () => {
+    textLen0 = textLen();
+    post({ type: "dom-ready", title: document.title });
+  });
   window.addEventListener("load", () => {
     post({ type: "load", title: document.title });
     check();

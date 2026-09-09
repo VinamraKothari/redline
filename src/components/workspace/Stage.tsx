@@ -118,19 +118,15 @@ export function Stage() {
     return () => window.removeEventListener("redline:reload", reload);
   }, [set]);
 
-  // capture a preview for the project page once the page has settled
+  // ask the server for a preview (rendered off the reviewer's tab) when missing or stale
   useEffect(() => {
-    if (!frameReady || !review || navigatedAway) return;
-    if (review.role === "view") return;
+    if (!review) return;
     const fresh = review.thumbnail_at && Date.now() - new Date(review.thumbnail_at).getTime() < STALE_MS;
     if (review.thumbnail_url && fresh) return;
-    const t = window.setTimeout(() => {
-      captureThumbnail(review.id, viewport).catch(() => {});
-    }, 3500);
-    return () => window.clearTimeout(t);
-    // only once per page load; viewport changes shouldn't re-capture
+    captureThumbnail(review.id).catch(() => {});
+    // only once per page load
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frameReady, review?.id, navigatedAway]);
+  }, [review?.id]);
 
   // set page title into the review after load
   useEffect(() => {
