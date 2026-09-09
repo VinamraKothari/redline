@@ -44,7 +44,7 @@ export function rewriteCss(css: string, cssUrl: string, appOrigin: string): stri
   return out;
 }
 
-const REL_THROUGH_PROXY = new Set(["stylesheet", "preload", "icon", "shortcut icon", "apple-touch-icon", "manifest"]);
+const REL_THROUGH_PROXY = new Set(["stylesheet", "preload", "modulepreload", "icon", "shortcut icon", "apple-touch-icon", "manifest"]);
 
 export interface RewriteOptions {
   /** the final URL after redirects; used as <base> */
@@ -97,7 +97,7 @@ export function rewriteHtml(html: string, opts: RewriteOptions): string {
   $("link[href]").each((_, el) => {
     const rel = ($(el).attr("rel") || "").toLowerCase().trim();
     const as = ($(el).attr("as") || "").toLowerCase();
-    if (REL_THROUGH_PROXY.has(rel) || (rel === "preload" && (as === "font" || as === "style"))) {
+    if (REL_THROUGH_PROXY.has(rel) || (rel === "preload" && (as === "font" || as === "style" || as === "script" || as === "fetch"))) {
       const abs = resolve(base, $(el).attr("href")!);
       if (abs) {
         $(el).attr("href", proxyUrl(abs, origin));
@@ -117,8 +117,21 @@ export function rewriteHtml(html: string, opts: RewriteOptions): string {
     if (s.includes("url(")) $(el).attr("style", rewriteCss(s, base, origin));
   });
 
-  // 5. Scripts & images stay on the original origin (fast, cacheable) but we drop
-  //    SRI / crossorigin so they aren't blocked by the origin change.
+  // 5. Scripts through the proxy too. Client frameworks (Next.js, Nuxt, Vite…)
+  //    load chunks and call APIs relative to the page; running them from a
+  //    foreign origin breaks chunk loading and CORS and crashes hydration. The
+  //    bridge routes runtime fetch()/XHR/dynamic <script> the same way.
+  //    Images/media stay on the original origin (no CORS needed, cacheable).
+  if (!opts.stripScripts) {
+    $("script[src]").each((_, el) => {
+      const abs = resolve(base, $(el).attr("src")!);
+      if (abs && /^https?:/i.test(abs)) {
+        $(el).attr("src", proxyUrl(abs, origin));
+        $(el).removeAttr("integrity");
+        $(el).removeAttr("crossorigin");
+      }
+    });
+  }
   $("script[integrity], link[integrity]").removeAttr("integrity");
   $("img[crossorigin], script[crossorigin], video[crossorigin], audio[crossorigin]").removeAttr("crossorigin");
 

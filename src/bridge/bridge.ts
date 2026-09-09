@@ -22,6 +22,106 @@
     }
   };
 
+  // ── Same-origin routing ──────────────────────────────────────────────────
+  // The document runs on the Redline origin, so the site's own scripts see a
+  // foreign origin: relative API calls hit us, absolute ones hit CORS, and
+  // framework chunk loaders fall over. Route GET traffic aimed at the site
+  // (absolute, or relative to our origin) through the proxy instead.
+  const appOrigin = location.origin;
+  let siteOrigin = "";
+  try {
+    siteOrigin = new URL(finalUrl).origin;
+  } catch {
+    /* ignore */
+  }
+  const proxied = (u: string): string => `${appOrigin}/api/proxy?url=${encodeURIComponent(u)}`;
+  /** Absolute site URL for a request, or null if it should be left alone. */
+  const siteUrlFor = (raw: string): string | null => {
+    let u: URL;
+    try {
+      u = new URL(raw, document.baseURI);
+    } catch {
+      return null;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (u.origin === appOrigin) {
+      // our own endpoints stay ours; anything else was meant for the site
+      if (u.pathname.startsWith("/api/proxy") || u.pathname === "/bridge.js") return null;
+      return siteOrigin ? siteOrigin + u.pathname + u.search : null;
+    }
+    return u.toString();
+  };
+
+  if (siteOrigin) {
+    const nativeFetch = window.fetch;
+    window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+      try {
+        const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (method === "GET" || method === "HEAD") {
+          const target = siteUrlFor(raw);
+          if (target) {
+            const req = input instanceof Request ? new Request(proxied(target), input) : proxied(target);
+            return nativeFetch.call(window, req, init);
+          }
+        }
+      } catch {
+        /* fall through */
+      }
+      return nativeFetch.call(window, input, init);
+    };
+
+    const xhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+      let u: string | URL = url;
+      try {
+        if (/^(GET|HEAD)$/i.test(method)) {
+          const target = siteUrlFor(String(url));
+          if (target) u = proxied(target);
+        }
+      } catch {
+        /* ignore */
+      }
+      return (xhrOpen as unknown as (...a: unknown[]) => void).apply(this, [method, u, ...rest]);
+    } as typeof XMLHttpRequest.prototype.open;
+
+    // Dynamically inserted <script src> / <link href> (webpack/vite chunk loaders).
+    const hookUrlProp = (proto: object, prop: string) => {
+      const desc = Object.getOwnPropertyDescriptor(proto, prop);
+      if (!desc?.set || !desc.get) return;
+      Object.defineProperty(proto, prop, {
+        configurable: true,
+        get() {
+          return desc.get!.call(this);
+        },
+        set(v: string) {
+          try {
+            const target = siteUrlFor(String(v));
+            if (target) v = proxied(target);
+          } catch {
+            /* ignore */
+          }
+          desc.set!.call(this, v);
+        },
+      });
+    };
+    hookUrlProp(HTMLScriptElement.prototype, "src");
+    hookUrlProp(HTMLLinkElement.prototype, "href");
+    const setAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name: string, value: string) {
+      try {
+        const n = name.toLowerCase();
+        if ((n === "src" && this instanceof HTMLScriptElement) || (n === "href" && this instanceof HTMLLinkElement)) {
+          const target = siteUrlFor(String(value));
+          if (target) value = proxied(target);
+        }
+      } catch {
+        /* ignore */
+      }
+      return setAttr.call(this, name, value);
+    };
+  }
+
   // ── Keep the page from escaping or hijacking the host origin ─────────────
   try {
     if ("serviceWorker" in navigator) {

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SPA — fixture</title>
+  <link rel="stylesheet" href="/site.css" />
+  <script type="module" src="/mod.js"></script>
+</head>
+<body>
+  <main>
+    <h1 data-testid="spa-headline">Client-rendered app</h1>
+    <div id="wishlist" data-testid="wishlist"><div class="skeleton">loading…</div></div>
+    <div id="status" data-testid="status">not hydrated</div>
+  </main>
+  <script>
+    // Simulates a client app: a relative API call + a dynamically inserted chunk,
+    // both of which only work if same-origin routing goes through the proxy.
+    (async function () {
+      try {
+        const res = await fetch("/api/data.json");
+        if (!res.ok) throw new Error("api " + res.status);
+        const data = await res.json();
+        document.getElementById("wishlist").textContent = data.wishlist;
+        await new Promise(function (resolve, reject) {
+          var s = document.createElement("script");
+          s.src = "/chunk.js";
+          s.onload = resolve;
+          s.onerror = function () { reject(new Error("chunk failed")); };
+          document.head.appendChild(s);
+        });
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/data.json");
+        xhr.onload = function () {
+          var ok = window.__chunkLoaded && xhr.status === 200;
+          document.getElementById("status").textContent = ok ? "hydrated" : "xhr " + xhr.status;
+        };
+        xhr.onerror = function () { document.getElementById("status").textContent = "xhr failed"; };
+        xhr.send();
+      } catch (e) {
+        document.getElementById("status").textContent = "crashed: " + e.message;
+      }
+    })();
+  </script>
+</body>
+</html>

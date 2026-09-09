@@ -59,25 +59,29 @@ export async function GET(req: NextRequest) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
 
+  const accept = req.headers.get("accept") || "";
+  const wantsDocument = /text\/html/i.test(accept) || !accept;
+  const upstreamHeaders: Record<string, string> = {
+    "user-agent": UA,
+    accept: accept || "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "accept-language": req.headers.get("accept-language") || "en-US,en;q=0.9",
+    "cache-control": "no-cache",
+  };
+  if (wantsDocument) {
+    // some CDNs vary on these
+    upstreamHeaders["sec-fetch-dest"] = "document";
+    upstreamHeaders["sec-fetch-mode"] = "navigate";
+    upstreamHeaders["sec-fetch-site"] = "none";
+    upstreamHeaders["upgrade-insecure-requests"] = "1";
+  }
+  // Framework data requests (Next.js RSC / router prefetch) need their headers.
+  req.headers.forEach((v, k) => {
+    if (/^(rsc|next-.*|x-requested-with)$/i.test(k)) upstreamHeaders[k] = v;
+  });
+
   let res: Response;
   try {
-    res = await fetch(u.toString(), {
-      redirect: "follow",
-      signal: ctrl.signal,
-      headers: {
-        "user-agent": UA,
-        accept:
-          req.headers.get("accept") ||
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "accept-language": req.headers.get("accept-language") || "en-US,en;q=0.9",
-        "cache-control": "no-cache",
-        // some CDNs vary on these
-        "sec-fetch-dest": "document",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-site": "none",
-        "upgrade-insecure-requests": "1",
-      },
-    });
+    res = await fetch(u.toString(), { redirect: "follow", signal: ctrl.signal, headers: upstreamHeaders });
   } catch (e) {
     clearTimeout(timer);
     const aborted = (e as Error).name === "AbortError";
@@ -141,10 +145,12 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Binary passthrough (fonts, images, etc.)
+  // Passthrough: scripts, fonts, images, JSON/API data, framework payloads…
+  // Only immutable-ish static assets are cached at the edge; data stays live.
+  const isStatic = res.ok && /javascript|ecmascript|font|image\/|css|wasm|svg/i.test(ct);
   const headers = new Headers();
   headers.set("content-type", ct || "application/octet-stream");
-  headers.set("cache-control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800");
+  headers.set("cache-control", isStatic ? "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800" : "no-store");
   headers.set("access-control-allow-origin", "*");
   return new Response(buf, { status: res.status, headers });
 }

@@ -167,3 +167,27 @@ test("falls back to a static render when the site's scripts destroy the document
   await page.getByRole("button", { name: /Site scripts: off/ }).click();
   await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
 });
+
+test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports go through the proxy", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/Paste a URL/).fill(FIXTURE.replace(/site\.html$/, "spa.html"));
+  await page.getByRole("button", { name: "Review" }).click();
+  await page.waitForURL(/\/r\/[a-z0-9]+/);
+  const frame = page.frameLocator('iframe[title="Page under review"]');
+  await expect(frame.locator('[data-testid="wishlist"]')).toHaveText("Your wishlist is empty", { timeout: 15_000 });
+  await expect(frame.locator('[data-testid="status"]')).toHaveText("hydrated");
+  // ES module import of an absolute path resolved via the catch-all redirect
+  const flags = await page.evaluate(() => {
+    const w = document.querySelector<HTMLIFrameElement>('iframe[title="Page under review"]')!.contentWindow as Window & {
+      __modLoaded?: boolean;
+      __depLoaded?: boolean;
+    };
+    return { mod: w.__modLoaded, dep: w.__depLoaded };
+  });
+  expect(flags).toEqual({ mod: true, dep: true });
+  // no fallback was triggered
+  await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
+  // the initial <script src> was rewritten to the proxy
+  const src = await frame.locator("script[type=module]").getAttribute("src");
+  expect(src).toContain("/api/proxy?url=");
+});
