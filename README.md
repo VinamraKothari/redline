@@ -52,6 +52,21 @@ The two public values are committed in `.env.production`; only the secret key ne
 
 Without these the app still runs, but data lives in a local JSON file and there is no realtime — fine for trying it out, not for sharing.
 
+## Sign-in, projects and roles
+
+Everyone signs in with Google (Supabase Auth). Reviews live in **projects**; only members can open them. Roles: **view** (open, read, export), **edit** (comment, draw, create and freeze reviews), **admin** (everything, plus members, invitations and deleting). Admins invite people by e-mail; access is granted the moment that address signs in with Google.
+
+One-time setup:
+
+1. Run `supabase/migration-002-auth-projects.sql` in the Supabase SQL editor (after `schema.sql`).
+2. Google Cloud Console → *APIs & Services → Credentials → Create credentials → OAuth client ID* (type **Web application**).
+   Authorized JavaScript origin: `https://<your-app-domain>`. Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`.
+   If prompted, configure the OAuth consent screen first (External, app name "Redline").
+3. Supabase → *Authentication → Sign In / Providers → Google*: enable, paste the client ID and secret.
+4. Supabase → *Authentication → URL Configuration*: Site URL `https://<your-app-domain>`; add `https://<your-app-domain>/auth/callback` (and `http://localhost:3000/auth/callback` for development) to Redirect URLs.
+
+For end-to-end tests (`REDLINE_TEST_AUTH=1`, never on Vercel) the login page offers a test user instead of Google.
+
 ## Tests
 
 ```bash
@@ -61,7 +76,9 @@ PW_CHROMIUM=/path/to/chrome bash scripts/e2e.sh
 
 ## Jira import
 
-Share → Export → **Jira CSV**, then in Jira: Settings → System → External system import → CSV. The columns Summary, Description, Issue Type, Priority, Status, Labels, Reporter, Created and Comment map automatically; `Redline URL`, `Element` and `Viewport` can go to custom fields or be skipped. Dates use Jira's default `dd/MMM/yy h:mm a` format.
+Share → Export → **Jira CSV**, then in Jira: Settings → System → External system import → CSV. The columns Summary, Description, Issue Type, Priority, Status, Labels, Reporter, Created, Comment and Attachment map automatically; `Redline URL`, `Element` and `Viewport` can go to custom fields or be skipped. Dates use Jira's default `dd/MMM/yy h:mm a` format.
+
+A thread's optional **title** (set in the composer or by clicking the thread header) becomes the Summary; without one it is generated from the first line. Images attached to comments are listed in the `Attachment` columns as `date;author;filename;url` — Jira downloads each file from the URL during import. Those URLs (`/api/attachments/…`) are public but unguessable, so the Jira importer can fetch them without a Redline account.
 
 ## Limitations
 

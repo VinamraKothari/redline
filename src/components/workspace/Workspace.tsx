@@ -5,7 +5,6 @@ import { api } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
 import { startRealtime, type RealtimeHandle } from "@/lib/realtime";
 import { loadReadState, useStore } from "@/lib/store";
-import { rememberRecent } from "@/components/home/Home";
 import { TooltipProvider } from "@/components/ui/primitives";
 import { TopBar } from "./TopBar";
 import { LeftRail } from "./LeftRail";
@@ -13,7 +12,7 @@ import { Stage } from "./Stage";
 import { RightPanel } from "./panels/RightPanel";
 import { DrawToolbar } from "./DrawToolbar";
 import { Toasts } from "./Toasts";
-import { NamePrompt } from "./NamePrompt";
+import { useMe } from "@/components/home/AccountMenu";
 import { useShortcuts } from "@/lib/hooks/useShortcuts";
 import { cn } from "@/lib/util";
 import { PanelRightOpen } from "lucide-react";
@@ -47,7 +46,6 @@ export function Workspace({
       panel: "comments",
       activeThread: focusComment,
     });
-    rememberRecent({ id: initial.id, url: initial.url, title: initial.title, at: initial.created_at });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.id]);
 
@@ -73,14 +71,15 @@ export function Workspace({
   }, [initial.id, set]);
 
   useShortcuts();
+  useMe();
 
-  // keep presence in sync when the reviewer sets / changes their name
+  // keep presence in sync once the profile arrives (or changes)
   useEffect(() => {
     let prev = useStore.getState().viewer;
     return useStore.subscribe((s) => {
-      if (s.viewer.name !== prev.name || s.viewer.color !== prev.color) {
+      if (s.viewer.user_id !== prev.user_id || s.viewer.name !== prev.name || s.viewer.color !== prev.color) {
         prev = s.viewer;
-        RealtimeContext.current?.track({ name: s.viewer.name || "Anonymous", color: s.viewer.color });
+        RealtimeContext.current?.track({ user_id: s.viewer.user_id, name: s.viewer.name, color: s.viewer.color, avatar_url: s.viewer.avatar_url });
       }
     });
   }, []);
@@ -105,7 +104,6 @@ export function Workspace({
         </div>
         {mode === "draw" && !fullscreen && <DrawToolbar />}
         <Toasts />
-        <NamePrompt />
       </div>
     </TooltipProvider>
   );

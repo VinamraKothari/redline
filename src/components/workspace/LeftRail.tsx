@@ -28,8 +28,8 @@ export function LeftRail() {
         </Tip>
       ))}
       <div className="my-1 h-px w-6 bg-line" />
-      <Tip label={showComments ? "Hide comments" : "Show comments"} kbd="⇧C">
-        <IconButton onClick={() => set({ showComments: !showComments })} aria-label="Toggle comments" size="lg">
+      <Tip label={showComments ? "Hide comments & drawings" : "Show comments & drawings"} kbd="⇧C">
+        <IconButton onClick={() => set({ showComments: !showComments })} aria-label="Toggle markup" size="lg">
           {showComments ? <Eye size={17} strokeWidth={1.8} /> : <EyeOff size={17} strokeWidth={1.8} />}
         </IconButton>
       </Tip>

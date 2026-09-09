@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { decodeBody, detectCharset, rewriteCss, rewriteHtml } from "@/lib/proxy/rewrite";
 import { PROXY_TARGET_HEADER, SITE_COOKIE } from "@/lib/proxy/site-cookie";
+import { currentUser } from "@/lib/auth/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,8 @@ function errorPage(status: number, title: string, detail: string, url: string): 
 export async function GET(req: NextRequest) {
   const target = req.nextUrl.searchParams.get("url") || req.headers.get(PROXY_TARGET_HEADER);
   if (!target) return new Response("missing url", { status: 400 });
+  // Members only — otherwise this would be an open proxy.
+  if (!(await currentUser())) return errorPage(401, "Please sign in", "Your Redline session has expired. Reload to sign in again.", target);
 
   let u: URL;
   try {

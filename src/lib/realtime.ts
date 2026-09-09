@@ -1,7 +1,8 @@
 "use client";
 
-import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
+import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { api } from "./api";
+import { supabaseBrowser } from "./auth/client";
 import { useStore } from "./store";
 import type { Comment, Shape, Viewer } from "./types";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./supabase-config";
@@ -10,15 +11,13 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./supabase-config";
  * Keeps the store in sync with other reviewers.
  *  - Supabase configured → Postgres change feed + Presence (cursors, avatars)
  *  - otherwise → polling every few seconds (no presence)
+ *
+ * The change feed runs on the signed-in user's connection, so row level
+ * security only delivers rows of reviews in projects they belong to.
  */
 
-let client: SupabaseClient | null = null;
 function supabase(): SupabaseClient | null {
-  const url = SUPABASE_URL;
-  const key = SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) return null;
-  if (!client) client = createClient(url, key, { auth: { persistSession: false } });
-  return client;
+  return supabaseBrowser();
 }
 
 export function realtimeAvailable(): boolean {
@@ -32,28 +31,57 @@ export interface RealtimeHandle {
   announceReview: () => void;
 }
 
+/**
+ * Starts syncing. Realtime needs a Supabase session on this browser (which
+ * e2e test users don't have), so the decision is made once the session is
+ * known; until then the handle is a no-op.
+ */
 export function startRealtime(reviewId: string): RealtimeHandle {
+  let inner: RealtimeHandle | null = null;
+  let stopped = false;
   const sb = supabase();
-  const st = useStore.getState;
-
-  if (!sb) {
-    // Polling fallback
-    let alive = true;
-    const tick = async () => {
-      if (!alive) return;
+  const decide = async () => {
+    let live = false;
+    if (sb) {
       try {
-        const [{ comments }, { shapes }] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId)]);
-        mergeComments(comments);
-        mergeShapes(shapes);
+        live = Boolean((await sb.auth.getSession()).data.session);
       } catch {
-        /* offline */
+        live = false;
       }
-      if (alive) setTimeout(tick, 4000);
-    };
-    setTimeout(tick, 4000);
-    return { stop: () => (alive = false), track: () => {}, announceReview: () => {} };
-  }
+    }
+    if (stopped) return;
+    inner = live && sb ? startLive(sb, reviewId) : startPolling(reviewId);
+  };
+  void decide();
+  return {
+    stop: () => {
+      stopped = true;
+      inner?.stop();
+    },
+    track: (v) => inner?.track(v),
+    announceReview: () => inner?.announceReview(),
+  };
+}
 
+function startPolling(reviewId: string): RealtimeHandle {
+  let alive = true;
+  const tick = async () => {
+    if (!alive) return;
+    try {
+      const [{ comments }, { shapes }] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId)]);
+      mergeComments(comments);
+      mergeShapes(shapes);
+    } catch {
+      /* offline */
+    }
+    if (alive) setTimeout(tick, 4000);
+  };
+  setTimeout(tick, 4000);
+  return { stop: () => (alive = false), track: () => {}, announceReview: () => {} };
+}
+
+function startLive(sb: SupabaseClient, reviewId: string): RealtimeHandle {
+  const st = useStore.getState;
   const channel: RealtimeChannel = sb.channel(`review:${reviewId}`, {
     config: { presence: { key: st().viewer.key } },
   });
@@ -84,19 +112,34 @@ export function startRealtime(reviewId: string): RealtimeHandle {
     })
     .on("presence", { event: "sync" }, () => {
       const state = channel.presenceState<Viewer>();
-      const me = st().viewer.key;
+      const me = st().viewer;
+      const prev = st().viewers;
       const others: Viewer[] = [];
       for (const [key, metas] of Object.entries(state)) {
-        if (key === me) continue;
+        if (key === me.key) continue;
         const m = metas[metas.length - 1];
-        if (m) others.push({ ...m, key });
+        if (!m) continue;
+        // keep the last streamed cursor position across presence re-syncs
+        const cursor = prev.find((v) => v.key === key)?.cursor ?? null;
+        others.push({ ...m, key, cursor });
       }
       st().set({ viewers: others });
+    })
+    // Cursors stream over broadcast (fire-and-forget, ~30 Hz) — presence is a
+    // state-sync mechanism and lags/batches when used for pointer positions.
+    .on("broadcast", { event: "cursor" }, ({ payload }) => {
+      const c = payload as { key: string; x: number | null; y: number | null; viewport_width: number };
+      const cur = st().viewers;
+      const i = cur.findIndex((v) => v.key === c.key);
+      if (i < 0) return;
+      const next = cur.slice();
+      next[i] = { ...next[i], cursor: c.x == null || c.y == null ? null : { x: c.x, y: c.y }, viewport_width: c.viewport_width };
+      st().set({ viewers: next });
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         const v = st().viewer;
-        await channel.track({ name: v.name || "Anonymous", color: v.color, cursor: null, viewport_width: st().viewport });
+        await channel.track({ user_id: v.user_id, name: v.name || "Someone", color: v.color, avatar_url: v.avatar_url ?? null, cursor: null, viewport_width: st().viewport });
       }
     });
 
@@ -112,10 +155,23 @@ export function startRealtime(reviewId: string): RealtimeHandle {
     }
   }, 30_000);
 
-  let last = 0;
+  let lastCursor = 0;
+  let pending: { x: number | null; y: number | null } | null = null;
+  let flushTimer = 0;
+  const flushCursor = () => {
+    flushTimer = 0;
+    if (!pending) return;
+    const p = pending;
+    pending = null;
+    lastCursor = performance.now();
+    channel
+      .send({ type: "broadcast", event: "cursor", payload: { key: st().viewer.key, x: p.x, y: p.y, viewport_width: st().viewport } })
+      .catch(() => {});
+  };
   return {
     stop: () => {
       clearInterval(reconcile);
+      clearTimeout(flushTimer);
       sb.removeChannel(channel);
     },
     announceReview: () => {
@@ -124,11 +180,18 @@ export function startRealtime(reviewId: string): RealtimeHandle {
       channel.send({ type: "broadcast", event: "review", payload: { mode: r.mode, snapshot_path: r.snapshot_path, title: r.title } }).catch(() => {});
     },
     track: (v) => {
-      const now = performance.now();
-      if (now - last < 40) return; // throttle cursor updates
-      last = now;
+      if ("cursor" in v) {
+        // stream the position; coalesce to one message per ~30 ms
+        pending = v.cursor ? { x: v.cursor.x, y: v.cursor.y } : { x: null, y: null };
+        const wait = 30 - (performance.now() - lastCursor);
+        if (wait <= 0) flushCursor();
+        else if (!flushTimer) flushTimer = window.setTimeout(flushCursor, wait);
+        return;
+      }
       const cur = st().viewer;
-      channel.track({ name: cur.name || "Anonymous", color: cur.color, viewport_width: st().viewport, ...v }).catch(() => {});
+      channel
+        .track({ user_id: cur.user_id, name: cur.name || "Someone", color: cur.color, avatar_url: cur.avatar_url ?? null, viewport_width: st().viewport, ...v })
+        .catch(() => {});
     },
   };
 }

@@ -160,7 +160,7 @@ export function DrawLayer({ geom }: { geom: StageGeom }) {
   const drag = useRef<{ id: string; start: Shape; lastX: number; lastY: number } | null>(null);
 
   const drawing = mode === "draw" && !viewOnly;
-  const visible = shapes.filter((s) => s.viewport_width === viewport && (showOthers || s.author_name === viewer.name));
+  const visible = shapes.filter((s) => s.viewport_width === viewport && (showOthers || s.author_id === viewer.user_id));
 
   const persist = useCallback(
     async (s: Shape) => {
@@ -237,6 +237,7 @@ export function DrawLayer({ geom }: { geom: StageGeom }) {
       type,
       data,
       style: { ...st },
+      author_id: viewer.user_id || null,
       author_name: viewer.name || "Anonymous",
       z: Date.now(),
       created_at: now,
@@ -247,7 +248,10 @@ export function DrawLayer({ geom }: { geom: StageGeom }) {
   /* pointer handlers on the drawing surface */
   function onDown(e: React.PointerEvent) {
     if (e.button !== 0 || tool === "select") return;
-    if (editing) return finishText();
+    if (editing) {
+      finishText();
+      if (tool !== "text") return;
+    }
     const { x, y } = geom.toPage(e.clientX, e.clientY);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const pressure = e.pressure || 0.5;
@@ -255,6 +259,9 @@ export function DrawLayer({ geom }: { geom: StageGeom }) {
     else if (tool === "line" || tool === "arrow") setLive(make(tool, { x, y, x2: x, y2: y }));
     else if (tool === "rect" || tool === "ellipse") setLive(make(tool, { x, y, w: 0, h: 0 }));
     else if (tool === "text") {
+      // The native focus change of this pointerdown would land *after* React
+      // mounts the editor and blur it straight away — keep focus where it is.
+      e.preventDefault();
       const s = make("text", { x, y, text: "" });
       setEditing({ id: s.id, x, y, text: "" });
       setLive(s);
@@ -369,7 +376,9 @@ export function DrawLayer({ geom }: { geom: StageGeom }) {
         </svg>
         {editing && (
           <textarea
-            autoFocus
+            ref={(el) => {
+              if (el && document.activeElement !== el) requestAnimationFrame(() => el.focus());
+            }}
             value={editing.text}
             onChange={(e) => setEditing({ ...editing, text: e.target.value })}
             onBlur={finishText}

@@ -194,12 +194,42 @@ export const MenuRadioGroup = DropdownPrimitive.RadioGroup;
 export const MenuRadioItem = DropdownPrimitive.RadioItem;
 
 /* ─── Avatar ─────────────────────────────────────────────────────────────── */
-export function Avatar({ name, color, size = 22, className }: { name: string; color: string; size?: number; className?: string }) {
+export function Avatar({
+  name,
+  color,
+  src,
+  size = 22,
+  className,
+}: {
+  name: string;
+  color: string;
+  /** Google profile picture, when there is one */
+  src?: string | null;
+  size?: number;
+  className?: string;
+}) {
+  const [broken, setBroken] = React.useState(false);
   const initialsOf = (n: string) => {
     const p = n.trim().split(/\s+/).filter(Boolean);
     if (!p.length) return "?";
     return (p.length === 1 ? p[0].slice(0, 2) : p[0][0] + p[p.length - 1][0]).toUpperCase();
   };
+  if (src && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name}
+        title={name}
+        width={size}
+        height={size}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        style={{ width: size, height: size, boxShadow: `0 0 0 1.5px ${color}` }}
+        className={cn("inline-block shrink-0 rounded-full object-cover select-none", className)}
+      />
+    );
+  }
   return (
     <span
       title={name}

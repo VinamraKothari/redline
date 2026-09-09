@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownUp, Check, ChevronDown, ChevronRight, Download, Filter, Image as ImageIcon, MessageSquare, Monitor, Smartphone, Tablet, Unlink, User } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, ChevronRight, Download, Filter, Image as ImageIcon, MessageSquare, Monitor, Smartphone, Tablet, Unlink } from "lucide-react";
 import { Avatar, Button, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuTrigger, Tip } from "@/components/ui/primitives";
 import { repliesOf, threadRoots, useStore, type CommentFilter, type CommentSort } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
@@ -34,7 +34,8 @@ function Tile({ c, active, unread, replies, onClick }: { c: Comment; active: boo
         {unread && <span className="h-2 w-2 rounded-full bg-red" />}
         {c.resolved && <Check size={13} className="text-green" />}
       </div>
-      <div className={cn("line-clamp-2 text-[12.5px] leading-[1.4]", c.resolved ? "text-ink-2" : "text-ink")}>
+      {c.title && <div className="truncate text-[12.5px] font-semibold text-ink">{c.title}</div>}
+      <div className={cn(c.title ? "line-clamp-1" : "line-clamp-2", "text-[12.5px] leading-[1.4]", c.resolved ? "text-ink-2" : "text-ink")}>
         {text || (c.attachments?.length ? <span className="inline-flex items-center gap-1 text-ink-3"><ImageIcon size={12} /> Image</span> : <span className="text-ink-3">(empty)</span>)}
       </div>
       <div className="flex items-center gap-2 text-[10.5px] text-ink-3">
@@ -72,16 +73,16 @@ export function CommentsPanel() {
         const replies = repliesOf(comments, c.id);
         const all = [c, ...replies];
         const last = all.reduce((m, x) => (x.created_at > m ? x.created_at : m), "");
-        const others = all.some((x) => x.author_name !== viewer.name);
+        const others = all.some((x) => x.author_id !== viewer.user_id);
         const unread = others && (!readAt[c.id] || readAt[c.id] < last);
         const mentionsMe = Boolean(viewer.name) && all.some((x) => mentionsIn(x.body).includes(viewer.name));
-        return { c, replies: replies.length, last, unread, mentionsMe, mine: all.some((x) => x.author_name === viewer.name) };
+        return { c, replies: replies.length, last, unread, mentionsMe, mine: all.some((x) => x.author_id === viewer.user_id) };
       })
       .filter((t) => (filter === "mine" ? t.mine : filter === "mentions" ? t.mentionsMe : true));
     const cmp = (a: (typeof roots)[number], b: (typeof roots)[number]) =>
       sort === "oldest" ? a.c.created_at.localeCompare(b.c.created_at) : sort === "unread" ? Number(b.unread) - Number(a.unread) || b.last.localeCompare(a.last) : b.last.localeCompare(a.last);
     return roots.sort(cmp);
-  }, [comments, viewer.name, readAt, filter, sort, onlyViewport, viewport]);
+  }, [comments, viewer.name, viewer.user_id, readAt, filter, sort, onlyViewport, viewport]);
 
   const pending = threads.filter((t) => !t.c.resolved);
   const resolved = threads.filter((t) => t.c.resolved);
@@ -159,11 +160,6 @@ export function CommentsPanel() {
             </IconButton>
           </Tip>
         )}
-        <Tip label={viewer.name ? `You're ${viewer.name} — change` : "Set your name"} side="bottom">
-          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("redline:name"))} className="rounded-full">
-            {viewer.name ? <Avatar name={viewer.name} color={viewer.color} size={22} /> : <span className="flex h-6 w-6 items-center justify-center rounded-full bg-hover text-ink-2"><User size={13} /></span>}
-          </button>
-        </Tip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">

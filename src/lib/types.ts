@@ -2,16 +2,62 @@
 
 export type ReviewMode = "live" | "frozen" | "upload";
 
+/** Project membership roles, least to most powerful. */
+export type Role = "view" | "edit" | "admin";
+export const ROLE_RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
+export const ROLE_LABEL: Record<Role, string> = { view: "Can view", edit: "Can edit", admin: "Admin" };
+
+/** A signed-in Google account. */
+export interface Profile {
+  id: string; // auth user id (uuid)
+  email: string;
+  name: string;
+  avatar_url: string | null;
+  color: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Project {
+  id: string; // short slug used in URLs
+  name: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  role: Role;
+  created_at: string;
+  /** joined for display */
+  profile?: Pick<Profile, "id" | "email" | "name" | "avatar_url" | "color">;
+}
+
+export interface ProjectInvite {
+  id: string;
+  project_id: string;
+  email: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  accepted_at: string | null;
+}
+
 export interface Review {
   id: string; // short slug used in URLs
+  project_id: string | null;
   url: string;
   title: string;
   mode: ReviewMode;
   /** storage path of a frozen / uploaded HTML snapshot */
   snapshot_path: string | null;
   default_viewport: number;
+  /** display name of the creator (denormalised) */
   created_by: string;
-  /** secret held by the creator's browser; unlocks owner actions */
+  created_by_id: string | null;
+  /** legacy secret from the pre-login era; unused now */
   owner_key: string;
   created_at: string;
   updated_at: string;
@@ -45,8 +91,11 @@ export interface Comment {
   id: string;
   review_id: string;
   parent_id: string | null; // null = thread root
+  author_id: string | null;
   author_name: string;
   author_color: string;
+  /** optional short title for the thread (becomes the Jira summary) */
+  title: string | null;
   body: string;
   anchor: Anchor | null; // only on thread roots
   viewport_width: number;
@@ -91,6 +140,7 @@ export interface Shape {
     text?: string;
   };
   style: ShapeStyle;
+  author_id: string | null;
   author_name: string;
   z: number;
   created_at: string;
@@ -98,8 +148,10 @@ export interface Shape {
 }
 
 export interface Viewer {
+  user_id: string;
   name: string;
   color: string;
+  avatar_url?: string | null;
   key: string; // per-tab session key
   cursor?: { x: number; y: number } | null;
   viewport_width?: number;

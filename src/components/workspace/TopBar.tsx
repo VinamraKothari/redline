@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, Code2, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
+import { AccountMenu } from "@/components/home/AccountMenu";
 import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tip, Button } from "@/components/ui/primitives";
 import { useStore } from "@/lib/store";
 import { VIEWPORTS } from "@/lib/types";
@@ -30,6 +31,15 @@ export function TopBar() {
 
   const vp = VIEWPORTS.find((v) => v.width === viewport);
   const VpIcon = vp ? KIND_ICON[vp.kind] : Monitor;
+  const others = useMemo(() => {
+    const seen = new Set<string>();
+    return viewers.filter((v) => {
+      const id = v.user_id || v.key;
+      if (id === viewer.user_id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, [viewers, viewer.user_id]);
 
   async function toggleFreeze() {
     if (!review) return;
@@ -169,20 +179,19 @@ export function TopBar() {
         </Tip>
       )}
 
-      {/* presence */}
-      {(viewers.length > 0 || viewer.name) && (
+      {/* presence — other people (one avatar per account, however many tabs they have open) */}
+      {others.length > 0 && (
         <div className="ml-1 flex items-center -space-x-1.5">
-          {viewer.name && <Avatar name={viewer.name} color={viewer.color} size={24} className="ring-2 ring-paper" />}
-          {viewers.slice(0, 5).map((v) => (
-            <Avatar key={v.key} name={v.name} color={v.color} size={24} className="ring-2 ring-paper" />
+          {others.slice(0, 5).map((v) => (
+            <Avatar key={v.user_id || v.key} name={v.name} color={v.color} src={v.avatar_url} size={24} className="ring-2 ring-paper" />
           ))}
-          {viewers.length > 5 && <span className="pl-2 text-[11px] text-ink-3">+{viewers.length - 5}</span>}
+          {others.length > 5 && <span className="pl-2 text-[11px] text-ink-3">+{others.length - 5}</span>}
         </div>
       )}
 
       <div className="mx-1 h-5 w-px bg-line" />
 
-      {!viewOnly && review?.is_owner && review.mode !== "upload" && (
+      {!viewOnly && review && review.mode !== "upload" && (
         <Tip label={review.mode === "frozen" ? "Unfreeze — go back to the live page" : "Freeze — capture this exact version for everyone"} side="bottom">
           <IconButton onClick={toggleFreeze} disabled={freezing} active={review.mode === "frozen"}>
             {review.mode === "frozen" ? <Sun size={15} /> : <Snowflake size={15} />}
@@ -200,6 +209,9 @@ export function TopBar() {
         <Share2 size={13} /> Share
       </Button>
       <ShareDialog open={share} onOpenChange={setShare} />
+      <div className="ml-1">
+        <AccountMenu size={26} />
+      </div>
     </header>
   );
 }

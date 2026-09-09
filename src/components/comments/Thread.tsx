@@ -28,11 +28,14 @@ function Reactions({ c }: { c: Comment }) {
   const toast = useStore((s) => s.toast);
   const entries = Object.entries(c.reactions || {});
 
+  const comments = useStore((s) => s.comments);
+  // reactions store user ids; show names where we know them
+  const nameOf = (id: string) => (id === viewer.user_id ? "You" : comments.find((x) => x.author_id === id)?.author_name || "Someone");
+
   async function react(emoji: string) {
     if (!review) return;
-    if (!viewer.name) return toast("Add your name first — write a comment or reply.");
     try {
-      const { comment } = await api.react(review.id, c.id, viewer.name, emoji);
+      const { comment } = await api.react(c.id, emoji);
       upsert(comment);
     } catch (e) {
       toast((e as Error).message, "error");
@@ -46,10 +49,10 @@ function Reactions({ c }: { c: Comment }) {
           key={emoji}
           type="button"
           onClick={() => react(emoji)}
-          title={who.join(", ")}
+          title={who.map(nameOf).join(", ")}
           className={cn(
             "flex h-6 items-center gap-1 rounded-full px-1.5 text-[12px] hairline transition-colors",
-            who.includes(viewer.name) ? "bg-blue-soft text-blue !shadow-[0_0_0_1px_var(--blue)]" : "bg-panel hover:bg-hover",
+            who.includes(viewer.user_id) ? "bg-blue-soft text-blue !shadow-[0_0_0_1px_var(--blue)]" : "bg-panel hover:bg-hover",
           )}
         >
           <span>{emoji}</span>
@@ -74,8 +77,15 @@ function Reactions({ c }: { c: Comment }) {
   );
 }
 
+/** Profile picture of another reviewer, when they are present right now. */
+function useAvatarOf() {
+  const viewers = useStore((s) => s.viewers);
+  return (id: string | null) => (id ? viewers.find((v) => v.user_id === id)?.avatar_url ?? null : null);
+}
+
 function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean; participants: string[] }) {
   const viewer = useStore((s) => s.viewer);
+  const avatarOf = useAvatarOf();
   const review = useStore((s) => s.review);
   const upsert = useStore((s) => s.upsertComment);
   const remove = useStore((s) => s.removeComment);
@@ -83,13 +93,13 @@ function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean;
   const set = useStore((s) => s.set);
   const [editing, setEditing] = useState(false);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
-  const mine = c.author_name === viewer.name;
-  const canManage = mine || review?.is_owner;
+  const mine = c.author_id === viewer.user_id;
+  const canManage = mine || review?.role === "admin";
 
   async function del() {
     if (!review) return;
     try {
-      await api.deleteComment(review.id, c.id, viewer.name);
+      await api.deleteComment(c.id);
       remove(c.id);
       if (isRoot) set({ activeThread: null });
       toast(isRoot ? "Thread deleted." : "Reply deleted.");
@@ -107,7 +117,7 @@ function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean;
   return (
     <div className="group/c px-3 py-2">
       <div className="flex items-center gap-2">
-        <Avatar name={c.author_name} color={c.author_color} size={22} />
+        <Avatar name={c.author_name} color={c.author_color} src={c.author_id === viewer.user_id ? viewer.avatar_url : avatarOf(c.author_id)} size={22} />
         <span className="truncate text-[12.5px] font-semibold text-ink">{c.author_name}</span>
         <span className="text-[11px] text-ink-3" title={new Date(c.created_at).toLocaleString()}>
           {timeAgo(c.created_at)}
@@ -153,7 +163,7 @@ function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean;
             onSubmit={async (body) => {
               if (!review) return;
               try {
-                const { comment } = await api.editComment(review.id, c.id, viewer.name, body);
+                const { comment } = await api.editComment(c.id, body);
                 upsert(comment);
                 setEditing(false);
               } catch (e) {
@@ -198,6 +208,7 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
   const viewer = useStore((s) => s.viewer);
   const review = useStore((s) => s.review);
   const viewport = useStore((s) => s.viewport);
+  const viewOnly = useStore((s) => s.viewOnly);
   const upsert = useStore((s) => s.upsertComment);
   const markRead = useStore((s) => s.markRead);
   const toast = useStore((s) => s.toast);
@@ -215,7 +226,7 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
   async function toggleResolve() {
     if (!root || !review) return;
     try {
-      const { comment } = await api.resolveComment(review.id, root.id, viewer.name, !root.resolved);
+      const { comment } = await api.resolveComment(root.id, !root.resolved);
       upsert(comment);
       toast(comment.resolved ? "Marked as resolved." : "Reopened.", "success");
       if (comment.resolved && !useStore.getState().showResolved) onClose?.();
@@ -224,8 +235,11 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
     }
   }
 
+  const canRetitle = !viewOnly && (root.author_id === viewer.user_id || review.role === "admin");
+
   return (
     <div className={cn("flex max-h-[70vh] flex-col", inPanel ? "" : "w-[340px]")}>
+      <TitleRow root={root} editable={canRetitle} />
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
         {root.anchor?.element_label ? (
           <span className="mono truncate px-1 text-[10.5px] text-ink-3" title={root.anchor.element_label}>
@@ -270,8 +284,6 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
           onSubmit={async (body, attachments) => {
             const { comment } = await api.createComment(review.id, {
               parent_id: root.id,
-              author_name: useStore.getState().viewer.name,
-              author_color: useStore.getState().viewer.color,
               body,
               attachments,
               viewport_width: viewport,
@@ -281,5 +293,80 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The thread's title — optional, shown bold above the thread and used as the
+ * Jira summary. Click to edit (author or admin); blank falls back to the
+ * auto-generated summary.
+ */
+function TitleRow({ root, editable }: { root: Comment; editable: boolean }) {
+  const upsert = useStore((s) => s.upsertComment);
+  const toast = useStore((s) => s.toast);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(root.title || "");
+
+  async function save() {
+    setEditing(false);
+    const next = value.trim();
+    if (next === (root.title || "")) return;
+    try {
+      const { comment } = await api.retitleComment(root.id, next);
+      upsert(comment);
+    } catch (e) {
+      setValue(root.title || "");
+      toast((e as Error).message, "error");
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="border-b border-line px-3 py-2">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+            if (e.key === "Escape") {
+              setValue(root.title || "");
+              setEditing(false);
+            }
+            e.stopPropagation();
+          }}
+          maxLength={140}
+          placeholder="Title (becomes the Jira summary)"
+          aria-label="Thread title"
+          className="w-full bg-transparent text-[13px] font-semibold text-ink placeholder:font-normal placeholder:text-ink-3 outline-none"
+        />
+      </div>
+    );
+  }
+  if (!root.title && !editable) return null;
+  return (
+    <button
+      type="button"
+      disabled={!editable}
+      onClick={() => {
+        setValue(root.title || "");
+        setEditing(true);
+      }}
+      title={editable ? "Edit title" : undefined}
+      className={cn(
+        "group/t flex w-full items-center gap-1.5 border-b border-line px-3 py-2 text-left",
+        editable && "hover:bg-hover",
+        !root.title && "text-ink-3",
+      )}
+    >
+      <span className={cn("min-w-0 flex-1 truncate text-[13px]", root.title ? "font-semibold text-ink" : "font-normal")}>
+        {root.title || "Add a title…"}
+      </span>
+      {editable && <Pencil size={11} className="shrink-0 text-ink-3 opacity-0 transition-opacity group-hover/t:opacity-100" />}
+    </button>
   );
 }

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { Comment, Review, Shape } from "@/lib/types";
+import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
 
 /**
  * Development fallback: a single JSON file under .data/.
@@ -12,7 +12,13 @@ interface Store {
   reviews: Record<string, Review>;
   comments: Record<string, Comment>;
   shapes: Record<string, Shape>;
+  profiles: Record<string, Profile>;
+  projects: Record<string, Project>;
+  members: Record<string, ProjectMember>; // key: project_id/user_id
+  invites: Record<string, ProjectInvite>;
 }
+const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {} });
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -29,9 +35,9 @@ async function load(): Promise<Store> {
   await writing;
   try {
     const raw = await fs.readFile(FILE, "utf8");
-    cache = JSON.parse(raw) as Store;
+    cache = { ...empty(), ...(JSON.parse(raw) as Partial<Store>) };
   } catch {
-    cache = { reviews: {}, comments: {}, shapes: {} };
+    cache = empty();
   }
   return cache;
 }
@@ -46,6 +52,119 @@ async function persist() {
 }
 
 export const localDb: DbAdapter = {
+  /* identity */
+  async getProfile(id) {
+    return (await load()).profiles[id] ?? null;
+  },
+  async getProfilesByIds(ids) {
+    const s = await load();
+    return ids.map((i) => s.profiles[i]).filter(Boolean);
+  },
+  async upsertProfile(p) {
+    const s = await load();
+    s.profiles[p.id] = p;
+    await persist();
+    return p;
+  },
+
+  /* projects & membership */
+  async createProject(p, owner) {
+    const s = await load();
+    s.projects[p.id] = p;
+    s.members[`${p.id}/${owner}`] = { project_id: p.id, user_id: owner, role: "admin", created_at: p.created_at };
+    await persist();
+    return p;
+  },
+  async getProject(id) {
+    return (await load()).projects[id] ?? null;
+  },
+  async updateProject(id, patch) {
+    const s = await load();
+    if (!s.projects[id]) return null;
+    s.projects[id] = { ...s.projects[id], ...patch, updated_at: new Date().toISOString() };
+    await persist();
+    return s.projects[id];
+  },
+  async deleteProject(id) {
+    const s = await load();
+    delete s.projects[id];
+    for (const [k, m] of Object.entries(s.members)) if (m.project_id === id) delete s.members[k];
+    for (const [k, i] of Object.entries(s.invites)) if (i.project_id === id) delete s.invites[k];
+    for (const r of Object.values(s.reviews)) if (r.project_id === id) await this.deleteReview(r.id);
+    await persist();
+  },
+  async listProjectsFor(userId) {
+    const s = await load();
+    return Object.values(s.members)
+      .filter((m) => m.user_id === userId && s.projects[m.project_id])
+      .map((m) => ({
+        ...s.projects[m.project_id],
+        role: m.role,
+        review_count: Object.values(s.reviews).filter((r) => r.project_id === m.project_id).length,
+      }))
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  },
+  async listReviews(projectId) {
+    const s = await load();
+    return Object.values(s.reviews)
+      .filter((r) => r.project_id === projectId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  },
+  async memberRole(projectId, userId) {
+    return (await load()).members[`${projectId}/${userId}`]?.role ?? null;
+  },
+  async listMembers(projectId) {
+    const s = await load();
+    return Object.values(s.members)
+      .filter((m) => m.project_id === projectId)
+      .map((m) => ({ ...m, profile: s.profiles[m.user_id] }))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
+  async setMember(projectId, userId, role) {
+    const s = await load();
+    const k = `${projectId}/${userId}`;
+    s.members[k] = { project_id: projectId, user_id: userId, role, created_at: s.members[k]?.created_at || new Date().toISOString() };
+    await persist();
+  },
+  async removeMember(projectId, userId) {
+    const s = await load();
+    delete s.members[`${projectId}/${userId}`];
+    await persist();
+  },
+  async listInvites(projectId) {
+    const s = await load();
+    return Object.values(s.invites)
+      .filter((i) => i.project_id === projectId && !i.accepted_at)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
+  async upsertInvite(i) {
+    const s = await load();
+    for (const [k, x] of Object.entries(s.invites)) {
+      if (x.project_id === i.project_id && x.email.toLowerCase() === i.email.toLowerCase()) delete s.invites[k];
+    }
+    s.invites[i.id] = i;
+    await persist();
+    return i;
+  },
+  async deleteInvite(id) {
+    const s = await load();
+    delete s.invites[id];
+    await persist();
+  },
+  async claimInvites(userId, email) {
+    const s = await load();
+    for (const inv of Object.values(s.invites)) {
+      if (inv.accepted_at || inv.email.toLowerCase() !== email.toLowerCase()) continue;
+      const k = `${inv.project_id}/${userId}`;
+      const cur = s.members[k]?.role ?? null;
+      if (!cur || RANK[inv.role] > RANK[cur]) {
+        s.members[k] = { project_id: inv.project_id, user_id: userId, role: inv.role, created_at: s.members[k]?.created_at || new Date().toISOString() };
+      }
+      inv.accepted_at = new Date().toISOString();
+    }
+    await persist();
+  },
+
   async createReview(r) {
     const s = await load();
     s.reviews[r.id] = r;
@@ -111,6 +230,9 @@ export const localDb: DbAdapter = {
     return Object.values(s.shapes)
       .filter((x) => x.review_id === reviewId)
       .sort((a, b) => a.z - b.z);
+  },
+  async getShape(id) {
+    return (await load()).shapes[id] ?? null;
   },
   async upsertShape(sh) {
     const s = await load();

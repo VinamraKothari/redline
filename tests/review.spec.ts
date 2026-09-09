@@ -21,19 +21,89 @@ async function pointIn(page: Page, selector: string, dx = 0.3, dy = 0.5) {
   );
 }
 
-async function createReview(page: Page) {
-  await page.goto("/");
-  await page.getByPlaceholder(/Paste a URL/).fill(FIXTURE);
+/** Test-mode sign-in (REDLINE_TEST_AUTH=1): a trusted cookie instead of Google. */
+async function signIn(page: Page, name = "Priya Test") {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const id = `00000000-0000-4000-8000-${slug.replace(/[^0-9a-f]/g, "0").padEnd(12, "0").slice(0, 12)}`;
+  const res = await page.request.post("/api/auth/test", { data: { id, email: `${slug}@example.test`, name } });
+  expect(res.ok()).toBeTruthy();
+  // creates the profile row and claims pending invites
+  await page.request.get("/api/me");
+  return { id, email: `${slug}@example.test`, name };
+}
+
+async function createProject(page: Page, name = "Acme redesign") {
+  const res = await page.request.post("/api/projects", { data: { name } });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()).project as { id: string };
+}
+
+/** Signs in, creates a project and starts a review of the fixture page through the UI. */
+async function createReview(page: Page, fixture = FIXTURE) {
+  await signIn(page);
+  const project = await createProject(page);
+  await page.goto(`/p/${project.id}`);
+  await page.getByPlaceholder(/Paste a URL/).fill(fixture);
   await page.getByRole("button", { name: "Review" }).click();
   await page.waitForURL(/\/r\/[a-z0-9]+/);
   const frame = page.frameLocator('iframe[title="Page under review"]');
-  await expect(frame.locator("h1")).toHaveText("Ship better design reviews");
+  if (fixture === FIXTURE) await expect(frame.locator("h1")).toHaveText("Ship better design reviews");
   return frame;
 }
 
-test("home page renders", async ({ page }) => {
+test("signed-out visitors land on the login page; signed-in users see their projects", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Design feedback");
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("button", { name: /Continue with Google/ })).toBeVisible();
+  await signIn(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("projects");
+  await page.getByLabel("New project name").fill("Gem House");
+  await page.getByRole("button", { name: /Create/ }).click();
+  await page.waitForURL(/\/p\/[a-z0-9]+/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Gem House");
+  await expect(page.getByText("You are an admin")).toBeVisible();
+});
+
+test("projects: invite by e-mail with a role, viewers can't edit, non-members can't open", async ({ page, browser }) => {
+  await createReview(page);
+  const url = page.url();
+  const reviewId = url.match(/\/r\/([a-z0-9]+)/)![1];
+  const review = await (await page.request.get(`/api/reviews/${reviewId}`)).json();
+  const pid = review.review.project_id as string;
+
+  // invite a viewer (who has never signed in) and an editor
+  const inv = await page.request.post(`/api/projects/${pid}/members`, { data: { email: "sam-viewer@example.test", role: "view" } });
+  expect(inv.ok()).toBeTruthy();
+  expect((await inv.json()).invite).toBeTruthy();
+
+  // the viewer signs in: the invite is claimed, the review opens read-only
+  const viewerCtx = await browser.newContext();
+  const vp = await viewerCtx.newPage();
+  await signIn(vp, "Sam Viewer");
+  await vp.goto(url);
+  await expect(vp.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
+  await expect(vp.locator("nav").getByLabel(/Comment/)).toHaveCount(0);
+  const denied = await vp.request.post(`/api/reviews/${reviewId}/comments`, {
+    data: { body: "nope", viewport_width: 1440, anchor: { selector: null, fx: 0, fy: 0, px: 1, py: 1 } },
+  });
+  expect(denied.status()).toBe(403);
+  await viewerCtx.close();
+
+  // a stranger gets a 404, not the page
+  const strangerCtx = await browser.newContext();
+  const sp = await strangerCtx.newPage();
+  await signIn(sp, "Eve Stranger");
+  const res = await sp.goto(url);
+  expect(res?.status()).toBe(404);
+  expect((await sp.request.get(`/api/reviews/${reviewId}`)).status()).toBe(404);
+  await strangerCtx.close();
+
+  // members dialog shows the viewer with their role
+  await page.goto(`/p/${pid}`);
+  await page.getByRole("button", { name: /member/ }).click();
+  await expect(page.getByText("Sam Viewer")).toBeVisible();
+  await expect(page.getByLabel("Role of Sam Viewer")).toHaveValue("view");
 });
 
 test("creates a review, proxies the page, neutralises frame busting", async ({ page }) => {
@@ -53,36 +123,61 @@ test("comment: pin, thread, reply, resolve, panel sections, CSV export", async (
   const pt = await pointIn(page, '[data-testid="headline"]', 0.1, 0.5);
   await page.mouse.click(pt.x, pt.y);
 
-  // composer opens; first-time name prompt inline
-  await page.getByPlaceholder(/Your name/).fill("Priya Test");
+  // composer opens with the signed-in identity — no name prompt
+  await expect(page.getByPlaceholder(/Your name/)).toHaveCount(0);
+  await page.getByLabel("Comment title").fill("Headline weight");
   await page.getByPlaceholder(/Leave a comment/).fill("The headline feels too heavy at this size.");
   await page.keyboard.press("Enter");
 
-  // pin visible + tile in Pending
+  // pin visible + tile in Pending, with the title
   await expect(page.locator("aside").getByText("The headline feels too heavy")).toBeVisible();
+  await expect(page.locator("aside").getByText("Headline weight")).toBeVisible();
   await expect(page.locator("aside").getByText("Pending")).toBeVisible();
   // thread popover shows element label from the anchor
   await page.locator("aside").getByText("The headline feels too heavy").click();
   await expect(page.getByText(/h1/).first()).toBeVisible();
 
-  // reply
+  // reply with an image
   await page.getByPlaceholder("Reply…").fill("Agreed — try 40px.");
+  await page.getByPlaceholder("Reply…").evaluate((el) => {
+    const dt = new DataTransfer();
+    const png = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
+    const bytes = new Uint8Array(png.length);
+    for (let i = 0; i < png.length; i++) bytes[i] = png.charCodeAt(i);
+    dt.items.add(new File([bytes], "shot.png", { type: "image/png" }));
+    el.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(page.locator('img[alt="shot.png"]').first()).toBeVisible();
+  await page.getByPlaceholder("Reply…").focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText("Agreed — try 40px.")).toBeVisible();
+
+  // edit the title from the thread header
+  await page.getByTitle("Edit title").click();
+  await page.getByLabel("Thread title").fill("Headline is too heavy");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("aside").getByText("Headline is too heavy")).toBeVisible();
 
   // resolve
   await page.getByRole("button", { name: "Mark as resolved" }).click();
   await expect(page.locator("aside").getByRole("button", { name: /^Resolved/ })).toBeVisible();
 
-  // CSV export endpoint has the row in Jira shape
+  // CSV export endpoint has the row in Jira shape: title as Summary, the reply as
+  // Comment, the image as a public Attachment URL that Jira can download
   const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
   const res = await page.request.get(`/api/reviews/${id}/export?format=jira`);
   expect(res.status()).toBe(200);
   const csv = await res.text();
-  expect(csv).toContain("Summary,Description,Issue Type,Priority,Status,Labels,Labels,Reporter,Created,Comment");
+  expect(csv).toContain("Summary,Description,Issue Type,Priority,Status,Labels,Labels,Reporter,Created,Comment,Attachment");
+  expect(csv).toMatch(/\r\nHeadline is too heavy,/);
   expect(csv).toContain("Done");
   expect(csv).toContain("Priya Test");
   expect(csv).toMatch(/\d{2}\/[A-Z][a-z]{2}\/\d{2} \d{1,2}:\d{2} [AP]M;Priya Test;Agreed — try 40px\./);
+  const att = csv.match(/;Priya Test;shot\.png;(http[^,"\r\n]+)/);
+  expect(att).toBeTruthy();
+  const img = await page.request.get(att![1]);
+  expect(img.status()).toBe(200);
+  expect(img.headers()["content-type"]).toBe("image/png");
 });
 
 test("inspect: hover, select, typography panel, alt-measure", async ({ page }) => {
@@ -149,11 +244,7 @@ test("view-only link hides authoring tools", async ({ page }) => {
 });
 
 test("falls back to a static render when the site's scripts destroy the document", async ({ page }) => {
-  await page.goto("/");
-  await page.getByPlaceholder(/Paste a URL/).fill(FIXTURE.replace(/site\.html$/, "spa-crash.html"));
-  await page.getByRole("button", { name: "Review" }).click();
-  await page.waitForURL(/\/r\/[a-z0-9]+/);
-  const frame = page.frameLocator('iframe[title="Page under review"]');
+  const frame = await createReview(page, FIXTURE.replace(/site\.html$/, "spa-crash.html"));
   // the bridge reports the crash, the stage reloads with js=0
   await expect(page.getByText(/scripts crashed inside the reviewer/)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('iframe[title="Page under review"]')).toHaveAttribute("src", /js=0/);
@@ -169,11 +260,7 @@ test("falls back to a static render when the site's scripts destroy the document
 });
 
 test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports go through the proxy", async ({ page }) => {
-  await page.goto("/");
-  await page.getByPlaceholder(/Paste a URL/).fill(FIXTURE.replace(/site\.html$/, "spa.html"));
-  await page.getByRole("button", { name: "Review" }).click();
-  await page.waitForURL(/\/r\/[a-z0-9]+/);
-  const frame = page.frameLocator('iframe[title="Page under review"]');
+  const frame = await createReview(page, FIXTURE.replace(/site\.html$/, "spa.html"));
   await expect(frame.locator('[data-testid="wishlist"]')).toHaveText("Your wishlist is empty", { timeout: 15_000 });
   await expect(frame.locator('[data-testid="status"]')).toHaveText("hydrated");
   // ES module import of an absolute path resolved via the catch-all redirect

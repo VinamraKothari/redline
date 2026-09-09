@@ -42,15 +42,40 @@ export function bundle(comments: Comment[]): ThreadBundle[] {
 
 /* ─── Jira CSV ───────────────────────────────────────────────────────────── */
 
+/** The Jira summary: the thread's title, or an auto-generated one from the first line. */
+export function jiraSummary(review: PublicReview, root: Comment): string {
+  if (root.title) return root.title;
+  const firstLine = plain(root.body).split("\n")[0].trim() || (root.attachments?.length ? "Image comment" : "Comment");
+  return `[${review.title}] ${firstLine.length > 110 ? firstLine.slice(0, 107) + "…" : firstLine}`;
+}
+
+/** Public URL of an attachment (served by /api/attachments — Jira downloads it from here). */
+export function attachmentUrl(origin: string, comment: Comment, att: Comment["attachments"][number]): string {
+  return `${origin}/api/attachments/${comment.id}/${att.id}`;
+}
+
+/**
+ * Jira's CSV importer takes attachments as "dd/MMM/yy h:mm a;author;filename;url"
+ * (or a bare URL) in one or more "Attachment" columns and downloads each file
+ * from the URL while importing.
+ */
+function jiraAttachment(origin: string, c: Comment, att: Comment["attachments"][number]): string {
+  const ext = att.url.startsWith("data:image/png") ? "png" : att.url.startsWith("data:image/webp") ? "webp" : "jpg";
+  const base = (att.name || "image").replace(/[^\w.-]+/g, "-").replace(/\.[^.]+$/, "") || "image";
+  return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${attachmentUrl(origin, c, att)}`;
+}
+
 /**
  * One row per thread in the shape Jira Cloud's CSV importer maps directly:
  * Summary, Description, Issue Type, Priority, Status, Labels (×2), Reporter,
- * Created, Comment (×N, "date;author;body"), plus extra columns you can map to
- * custom fields or skip.
+ * Created, Comment (×N, "date;author;body"), Attachment (×N), plus extra
+ * columns you can map to custom fields or skip.
  */
 export function toJiraCsv(review: PublicReview, comments: Comment[], origin: string): string {
   const threads = bundle(comments);
   const maxReplies = Math.max(0, ...threads.map((t) => t.replies.length));
+  const attachmentsOf = ({ root, replies }: ThreadBundle) => [root, ...replies].flatMap((c) => (c.attachments || []).map((a) => jiraAttachment(origin, c, a)));
+  const maxAttachments = Math.max(0, ...threads.map((t) => attachmentsOf(t).length));
   const header = [
     "Summary",
     "Description",
@@ -62,16 +87,16 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
     "Reporter",
     "Created",
     ...Array.from({ length: maxReplies }, () => "Comment"),
+    ...Array.from({ length: maxAttachments }, () => "Attachment"),
     "Redline URL",
     "Element",
     "Viewport",
     "Page URL",
-    "Attachments",
   ];
-  const rows = threads.map(({ root, replies }, i) => {
-    const firstLine = plain(root.body).split("\n")[0].trim() || (root.attachments?.length ? "Image comment" : "Comment");
-    const summary = `[${review.title}] ${firstLine.length > 110 ? firstLine.slice(0, 107) + "…" : firstLine}`;
+  const rows = threads.map((t) => {
+    const { root, replies } = t;
     const link = `${origin}/r/${review.id}?c=${root.id}`;
+    const atts = attachmentsOf(t);
     const description = [
       plain(root.body),
       "",
@@ -80,12 +105,12 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       `*Viewport:* ${root.viewport_width}px`,
       root.anchor?.region ? `*Region:* ${Math.round(root.anchor.region.w)}×${Math.round(root.anchor.region.h)}px` : null,
       `*Open in Redline:* ${link}`,
-      root.attachments?.length ? `*Attachments:* ${root.attachments.length} image(s) — see the Redline link` : null,
+      atts.length ? `*Attachments:* ${atts.length} image(s), attached to this issue` : null,
     ]
       .filter((x) => x !== null)
       .join("\n");
     const cells = [
-      summary,
+      jiraSummary(review, root),
       description,
       "Task",
       "Medium",
@@ -98,13 +123,12 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
         const r = replies[k];
         return r ? `${jiraDate(r.created_at)};${r.author_name};${plain(r.body).replace(/\r?\n/g, " ")}` : "";
       }),
+      ...Array.from({ length: maxAttachments }, (_, k) => atts[k] || ""),
       link,
       root.anchor?.element_label || "",
       String(root.viewport_width),
       review.url,
-      String(root.attachments?.length || 0),
     ];
-    void i;
     return cells.map(csvCell).join(",");
   });
   return "﻿" + [header.map(csvCell).join(","), ...rows].join("\r\n");
@@ -120,7 +144,7 @@ export function toMarkdown(review: PublicReview, comments: Comment[], origin: st
     if (!list.length) return "";
     const out = [`## ${title} (${list.length})`, ""];
     list.forEach(({ root, replies }, i) => {
-      out.push(`### ${i + 1}. ${plain(root.body).split("\n")[0].slice(0, 90) || "Image comment"}`);
+      out.push(`### ${i + 1}. ${root.title || plain(root.body).split("\n")[0].slice(0, 90) || "Image comment"}`);
       out.push(`- **By:** ${root.author_name} · ${new Date(root.created_at).toLocaleString()}`);
       if (root.anchor?.element_label) out.push(`- **Element:** \`${root.anchor.element_label}\``);
       out.push(`- **Viewport:** ${root.viewport_width}px`);

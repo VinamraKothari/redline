@@ -1,26 +1,27 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { guarded, reviewAccess, syncProfile } from "@/lib/auth/server";
 import type { Comment } from "@/lib/types";
-import { colorFor, newId } from "@/lib/util";
+import { newId } from "@/lib/util";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/comments">) {
+export const GET = guarded(async (_req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/comments">) => {
   const { id } = await ctx.params;
+  await reviewAccess(id);
   const d = await db();
   return Response.json({ comments: await d.listComments(id) });
-}
+});
 
-export async function POST(req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/comments">) {
+export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/comments">) => {
   const { id } = await ctx.params;
+  const { user, review } = await reviewAccess(id, "edit");
+  const profile = await syncProfile(user);
   const d = await db();
-  const review = await d.getReview(id);
-  if (!review) return Response.json({ error: "not found" }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as Partial<Comment>;
-  const author = (body.author_name || "").trim().slice(0, 60);
   const text = (body.body || "").trim();
-  if (!author) return Response.json({ error: "Add your name first." }, { status: 400 });
+  const title = (body.title || "").trim().slice(0, 140) || null;
   if (!text && !(body.attachments && body.attachments.length)) {
     return Response.json({ error: "Write something first." }, { status: 400 });
   }
@@ -40,8 +41,10 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/reviews/[id
     id: newId(),
     review_id: id,
     parent_id: isReply ? body.parent_id! : null,
-    author_name: author,
-    author_color: body.author_color || colorFor(author),
+    author_id: user.id,
+    author_name: profile.name,
+    author_color: profile.color,
+    title: isReply ? null : title,
     body: text,
     anchor: isReply ? null : body.anchor!,
     viewport_width: Number(body.viewport_width) || review.default_viewport,
@@ -53,4 +56,4 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/reviews/[id
   };
   await d.createComment(c);
   return Response.json({ comment: c });
-}
+});

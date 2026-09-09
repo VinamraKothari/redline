@@ -1,50 +1,74 @@
 "use client";
 
-import type { Anchor, Attachment, Comment, Shape } from "./types";
+import type { Anchor, Attachment, Comment, Profile, Project, ProjectInvite, ProjectMember, Role, Shape } from "./types";
 import type { PublicReview } from "./review";
 
-const OWNER_KEY = "redline:owner:";
+export type ProjectSummary = Project & { role: Role; review_count: number };
 
-export function getOwnerKey(reviewId: string): string | null {
-  try {
-    return localStorage.getItem(OWNER_KEY + reviewId);
-  } catch {
-    return null;
-  }
-}
-export function setOwnerKey(reviewId: string, key: string) {
-  try {
-    localStorage.setItem(OWNER_KEY + reviewId, key);
-  } catch {
-    /* ignore */
-  }
-}
-
-async function call<T>(url: string, init: RequestInit & { reviewId?: string; actor?: string } = {}): Promise<T> {
+async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string>) };
-  if (init.reviewId) {
-    const k = getOwnerKey(init.reviewId);
-    if (k) headers["x-owner-key"] = k;
-  }
-  if (init.actor) headers["x-actor"] = init.actor;
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (res.status === 401 && typeof window !== "undefined") {
+    // session gone: back to sign-in, then straight back here
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
 
 export const api = {
-  createReview(body: { url?: string; name?: string; viewport?: number; mode?: "live" | "upload"; html?: string; title?: string }) {
-    return call<{ review: PublicReview & { owner_key: string } }>("/api/reviews", { method: "POST", body: JSON.stringify(body) });
+  /* identity */
+  me() {
+    return call<{ user: Profile }>("/api/me", { cache: "no-store" });
+  },
+
+  /* projects */
+  listProjects() {
+    return call<{ projects: ProjectSummary[] }>("/api/projects", { cache: "no-store" });
+  },
+  createProject(name: string) {
+    return call<{ project: ProjectSummary }>("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
+  },
+  loadProject(id: string) {
+    return call<{ project: Project & { role: Role }; reviews: PublicReview[]; members: ProjectMember[]; invites: ProjectInvite[] }>(`/api/projects/${id}`, {
+      cache: "no-store",
+    });
+  },
+  renameProject(id: string, name: string) {
+    return call<{ project: Project }>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+  },
+  deleteProject(id: string) {
+    return call<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" });
+  },
+  invite(projectId: string, email: string, role: Role) {
+    return call<{ member: ProjectMember | null; invite: ProjectInvite | null }>(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    });
+  },
+  setRole(projectId: string, userId: string, role: Role) {
+    return call<{ ok: true }>(`/api/projects/${projectId}/members`, { method: "PATCH", body: JSON.stringify({ user_id: userId, role }) });
+  },
+  removeMember(projectId: string, userId: string) {
+    return call<{ ok: true }>(`/api/projects/${projectId}/members?user_id=${encodeURIComponent(userId)}`, { method: "DELETE" });
+  },
+  cancelInvite(projectId: string, inviteId: string) {
+    return call<{ ok: true }>(`/api/projects/${projectId}/members?invite=${encodeURIComponent(inviteId)}`, { method: "DELETE" });
+  },
+
+  /* reviews */
+  createReview(body: { project_id: string; url?: string; viewport?: number; mode?: "live" | "upload"; html?: string; title?: string }) {
+    return call<{ review: PublicReview }>("/api/reviews", { method: "POST", body: JSON.stringify(body) });
   },
   loadReview(id: string) {
-    return call<{ review: PublicReview; comments: Comment[]; shapes: Shape[] }>(`/api/reviews/${id}`, { reviewId: id, cache: "no-store" });
+    return call<{ review: PublicReview; comments: Comment[]; shapes: Shape[] }>(`/api/reviews/${id}`, { cache: "no-store" });
   },
   patchReview(id: string, patch: Partial<PublicReview>) {
-    return call<{ review: PublicReview }>(`/api/reviews/${id}`, { method: "PATCH", body: JSON.stringify(patch), reviewId: id });
+    return call<{ review: PublicReview }>(`/api/reviews/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
   },
   deleteReview(id: string) {
-    return call<{ ok: true }>(`/api/reviews/${id}`, { method: "DELETE", reviewId: id });
+    return call<{ ok: true }>(`/api/reviews/${id}`, { method: "DELETE" });
   },
 
   listComments(id: string) {
@@ -54,8 +78,7 @@ export const api = {
     reviewId: string,
     body: {
       parent_id?: string | null;
-      author_name: string;
-      author_color: string;
+      title?: string | null;
       body: string;
       anchor?: Anchor | null;
       viewport_width: number;
@@ -64,24 +87,23 @@ export const api = {
   ) {
     return call<{ comment: Comment }>(`/api/reviews/${reviewId}/comments`, { method: "POST", body: JSON.stringify(body) });
   },
-  editComment(reviewId: string, id: string, actor: string, body: string) {
-    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "edit", actor, body }), reviewId });
+  editComment(id: string, body: string) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "edit", body }) });
   },
-  resolveComment(reviewId: string, id: string, actor: string, resolved: boolean) {
-    return call<{ comment: Comment }>(`/api/comments/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ action: "resolve", actor, resolved }),
-      reviewId,
-    });
+  retitleComment(id: string, title: string) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "title", title }) });
   },
-  react(reviewId: string, id: string, actor: string, emoji: string) {
-    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "react", actor, emoji }), reviewId });
+  resolveComment(id: string, resolved: boolean) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "resolve", resolved }) });
   },
-  moveComment(reviewId: string, id: string, actor: string, anchor: Anchor) {
-    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "move", actor, anchor }), reviewId });
+  react(id: string, emoji: string) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "react", emoji }) });
   },
-  deleteComment(reviewId: string, id: string, actor: string) {
-    return call<{ ok: true }>(`/api/comments/${id}`, { method: "DELETE", reviewId, actor });
+  moveComment(id: string, anchor: Anchor) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "move", anchor }) });
+  },
+  deleteComment(id: string) {
+    return call<{ ok: true }>(`/api/comments/${id}`, { method: "DELETE" });
   },
 
   listShapes(id: string) {
@@ -102,6 +124,6 @@ export const api = {
   },
 
   freeze(reviewId: string, html: string) {
-    return call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { method: "POST", body: JSON.stringify({ html }), reviewId });
+    return call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { method: "POST", body: JSON.stringify({ html }) });
   },
 };

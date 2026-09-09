@@ -12,8 +12,13 @@ function download(name: string, content: string | Blob, type = "text/plain") {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 4000);
 }
 
 function LinkRow({ label, hint, url, Icon }: { label: string; hint: string; url: string; Icon: typeof Link2 }) {
@@ -55,13 +60,16 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
 
   async function exportPng() {
     setBusy(true);
+    toast("Rendering the canvas… this can take a few seconds on long pages.");
     try {
       const { toPng } = await import("@/lib/png");
       const blob = await toPng(viewport);
-      if (blob) download(`${safe}-${viewport}.png`, blob, "image/png");
-      else toast("Couldn't render the page to an image.", "error");
+      if (blob) {
+        download(`${safe}-${viewport}.png`, blob, "image/png");
+        toast("PNG downloaded.", "success");
+      } else toast("Couldn't render the page to an image.", "error");
     } catch (e) {
-      toast((e as Error).message, "error");
+      toast(`PNG export failed: ${(e as Error).message}`, "error");
     } finally {
       setBusy(false);
     }
@@ -69,10 +77,14 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Share this review" description="Anyone with the link can view. Reviewers just type a name — no account needed." width={480}>
+      <DialogContent
+        title="Share this review"
+        description="Only members of this project can open it. Add people under Members on the project page; their role decides what they can do."
+        width={480}
+      >
         <div className="flex flex-col gap-2">
-          <LinkRow label="Review link" hint="Comment, draw and inspect" url={base} Icon={Link2} />
-          <LinkRow label="View-only link" hint="Browse and inspect, no editing tools" url={`${base}?mode=view`} Icon={Eye} />
+          <LinkRow label="Review link" hint="Members comment, draw and inspect according to their role" url={base} Icon={Link2} />
+          <LinkRow label="View-only link" hint="Same page with the editing tools hidden — handy for presenting" url={`${base}?mode=view`} Icon={Eye} />
         </div>
 
         <h3 className="mb-2 mt-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-3">Export</h3>
@@ -95,8 +107,10 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         </div>
         <p className="mt-3 text-[11.5px] leading-relaxed text-ink-3">
           The Jira CSV uses the columns Jira Cloud&apos;s importer maps by default (Summary, Description, Issue Type, Priority, Status, Labels,
-          Reporter, Created, Comment). In Jira: <span className="text-ink-2">Settings → System → External system import → CSV</span>. Extra columns
-          (Redline URL, Element, Viewport) can be mapped to custom fields or skipped.
+          Reporter, Created, Comment, Attachment). A thread&apos;s title becomes its Summary; images attached to comments are listed as public URLs
+          in the Attachment columns and Jira downloads them during import. In Jira:{" "}
+          <span className="text-ink-2">Settings → System → External system import → CSV</span>. Extra columns (Redline URL, Element, Viewport) can
+          be mapped to custom fields or skipped.
         </p>
       </DialogContent>
     </Dialog>

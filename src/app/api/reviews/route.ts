@@ -1,28 +1,25 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { guarded, projectAccess, syncProfile } from "@/lib/auth/server";
+import { publicReview } from "@/lib/review";
 import type { Review } from "@/lib/types";
 import { hostOf, newKey, newSlug, normalizeUrl } from "@/lib/util";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  try {
-    return await create(req);
-  } catch (e) {
-    console.error("[redline] create review failed", e);
-    return Response.json({ error: (e as Error).message || "Could not create the review." }, { status: 500 });
-  }
-}
-
-async function create(req: NextRequest) {
+/** Create a review inside a project (edit role). */
+export const POST = guarded(async (req: NextRequest) => {
   const body = (await req.json().catch(() => ({}))) as {
+    project_id?: string;
     url?: string;
-    name?: string;
     viewport?: number;
     mode?: "live" | "upload";
     html?: string;
     title?: string;
   };
+  if (!body.project_id) return Response.json({ error: "Pick a project first." }, { status: 400 });
+  const { user, role } = await projectAccess(body.project_id, "edit");
+  const profile = await syncProfile(user);
 
   let url: string | null = null;
   if (body.mode === "upload") {
@@ -38,12 +35,14 @@ async function create(req: NextRequest) {
   const now = new Date().toISOString();
   const review: Review = {
     id: newSlug(),
+    project_id: body.project_id,
     url,
     title: body.title || (body.mode === "upload" ? body.title || "Uploaded page" : hostOf(url)),
     mode: body.mode === "upload" ? "upload" : "live",
     snapshot_path: null,
     default_viewport: body.viewport || 1440,
-    created_by: (body.name || "Anonymous").slice(0, 60),
+    created_by: profile.name,
+    created_by_id: user.id,
     owner_key: newKey(),
     created_at: now,
     updated_at: now,
@@ -55,5 +54,6 @@ async function create(req: NextRequest) {
     await d.putSnapshot(review.snapshot_path, body.html);
   }
   await d.createReview(review);
-  return Response.json({ review });
-}
+  await d.updateProject(body.project_id, {});
+  return Response.json({ review: publicReview(review, role, user.id) });
+});

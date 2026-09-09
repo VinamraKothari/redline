@@ -80,7 +80,6 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   const readAt = useStore((s) => s.readAt);
   const viewer = useStore((s) => s.viewer);
   const review = useStore((s) => s.review);
-  const mode = useStore((s) => s.mode);
   const viewOnly = useStore((s) => s.viewOnly);
   const set = useStore((s) => s.set);
   const upsert = useStore((s) => s.upsertComment);
@@ -97,13 +96,13 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
         const pos = frame().resolveAnchor(c.anchor);
         const replies = repliesOf(comments, c.id);
         const last = [c, ...replies].reduce((m, x) => (x.created_at > m ? x.created_at : m), "");
-        const mineLast = [c, ...replies].every((x) => x.author_name === viewer.name);
+        const mineLast = [c, ...replies].every((x) => x.author_id === viewer.user_id);
         const unread = !mineLast && (!readAt[c.id] || readAt[c.id] < last);
         return { c, x: pos.x, y: pos.y, detached: pos.detached, unread, replies: replies.length };
       })
       .filter(Boolean) as Placed[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.name]);
+  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.user_id]);
 
   // scroll to the active thread's pin when it's opened from the panel / permalink
   useEffect(() => {
@@ -123,13 +122,11 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   const inv = 1 / geom.zoom;
 
-  async function submitDraft(body: string, attachments: Comment["attachments"]) {
+  async function submitDraft(body: string, attachments: Comment["attachments"], title: string) {
     if (!draft || !review) return;
     try {
-      const st = useStore.getState();
       const { comment } = await api.createComment(review.id, {
-        author_name: st.viewer.name,
-        author_color: st.viewer.color,
+        title: title || null,
         body,
         attachments,
         viewport_width: viewport,
@@ -153,9 +150,16 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   // pin dragging (move your own pins)
   function onPinDown(p: Placed, e: React.PointerEvent) {
-    if (viewOnly || mode === "browse") return;
-    if (p.c.author_name !== viewer.name && !review?.is_owner) return;
+    if (viewOnly) return;
+    if (p.c.author_id !== viewer.user_id && review?.role !== "admin") return;
     e.stopPropagation();
+    // Capture so the drag keeps reporting to us even while the pointer is
+    // over the page iframe (browse mode has no overlay above it).
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     dragging.current = { id: p.c.id, moved: false };
     const startX = e.clientX;
     const startY = e.clientY;
@@ -180,7 +184,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
       const region = c?.anchor?.region ? { ...c.anchor.region, x: x - c.anchor.region.w, y } : null;
       const anchor = frame().anchorFor(region ? region.x + region.w / 2 : x, region ? region.y + region.h / 2 : y, region);
       try {
-        const { comment } = await api.moveComment(review.id, p.c.id, viewer.name, { ...anchor, px: x, py: y, region });
+        const { comment } = await api.moveComment(p.c.id, { ...anchor, px: x, py: y, region });
         upsert(comment);
       } catch (err) {
         toast((err as Error).message, "error");
@@ -289,6 +293,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
               )}
               <Composer
                 autoFocus
+                withTitle
                 participants={participants}
                 placeholder="Leave a comment… (@ to mention)"
                 onSubmit={submitDraft}

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImagePlus, SendHorizontal, Smile, X } from "lucide-react";
-import { Avatar, IconButton, Input, Popover, PopoverContent, PopoverTrigger } from "@/components/ui/primitives";
-import { saveViewer, useStore } from "@/lib/store";
+import { Avatar, IconButton, Popover, PopoverContent, PopoverTrigger } from "@/components/ui/primitives";
+import { useStore } from "@/lib/store";
 import type { Attachment } from "@/lib/types";
 import { cn, colorFor } from "@/lib/util";
 
@@ -44,21 +44,24 @@ export function Composer({
   submitLabel,
   compact,
   participants = [],
+  withTitle,
 }: {
   placeholder?: string;
   autoFocus?: boolean;
-  onSubmit: (body: string, attachments: Attachment[]) => Promise<void> | void;
+  onSubmit: (body: string, attachments: Attachment[], title: string) => Promise<void> | void;
   onCancel?: () => void;
   onDirty?: (dirty: boolean) => void;
   initial?: string;
   submitLabel?: string;
   compact?: boolean;
   participants?: string[];
+  /** new threads: an optional title that becomes the Jira summary */
+  withTitle?: boolean;
 }) {
   const viewer = useStore((s) => s.viewer);
   const viewers = useStore((s) => s.viewers);
   const [text, setText] = useState(initial);
-  const [name, setName] = useState(viewer.name);
+  const [title, setTitle] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [mention, setMention] = useState<{ q: string; at: number } | null>(null);
@@ -66,16 +69,14 @@ export function Composer({
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const needsName = !viewer.name;
-
   useEffect(() => {
-    onDirty?.(text.trim().length > 0 || attachments.length > 0);
+    onDirty?.(text.trim().length > 0 || attachments.length > 0 || title.trim().length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, attachments.length]);
+  }, [text, attachments.length, title]);
 
   useEffect(() => {
-    if (autoFocus) setTimeout(() => (needsName ? undefined : ta.current?.focus()), 30);
-  }, [autoFocus, needsName]);
+    if (autoFocus) setTimeout(() => ta.current?.focus(), 30);
+  }, [autoFocus]);
 
   // autosize
   useEffect(() => {
@@ -138,15 +139,11 @@ export function Composer({
   async function submit() {
     const body = text.trim();
     if (!body && !attachments.length) return;
-    if (needsName) {
-      const n = name.trim();
-      if (!n) return;
-      saveViewer(n, colorFor(n));
-    }
     setBusy(true);
     try {
-      await onSubmit(body, attachments);
+      await onSubmit(body, attachments, title.trim());
       setText("");
+      setTitle("");
       setAttachments([]);
     } finally {
       setBusy(false);
@@ -198,28 +195,26 @@ export function Composer({
       }}
       onDragOver={(e) => e.preventDefault()}
     >
-      {needsName && (
-        <div className="mb-2 flex items-center gap-2">
-          <Avatar name={name || "?"} color={colorFor(name || "?")} size={24} />
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Your name (shown on your comments)"
-            maxLength={40}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                ta.current?.focus();
-              }
-            }}
-          />
-        </div>
-      )}
-
       <div className="flex items-start gap-2">
-        {!needsName && !compact && <Avatar name={viewer.name} color={viewer.color} size={24} className="mt-1" />}
+        {!compact && <Avatar name={viewer.name || "?"} color={viewer.color} src={viewer.avatar_url} size={24} className="mt-1" />}
         <div className="min-w-0 flex-1 rounded-lg bg-paper hairline focus-within:shadow-[0_0_0_2px_var(--blue)] transition-shadow">
+          {withTitle && (
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Title (optional — becomes the Jira summary)"
+              maxLength={140}
+              aria-label="Comment title"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  ta.current?.focus();
+                }
+                if (e.key === "Escape") onCancel?.();
+              }}
+              className="block w-full border-b border-line bg-transparent px-2.5 pb-1.5 pt-2 text-[12.5px] font-semibold text-ink placeholder:font-normal placeholder:text-ink-3 outline-none"
+            />
+          )}
           <textarea
             ref={ta}
             value={text}
@@ -282,7 +277,7 @@ export function Composer({
             <button
               type="button"
               onClick={submit}
-              disabled={busy || (!text.trim() && !attachments.length) || (needsName && !name.trim())}
+              disabled={busy || (!text.trim() && !attachments.length)}
               className="flex h-7 items-center gap-1 rounded-md bg-ink px-2.5 text-[12px] font-medium text-white disabled:opacity-35"
               title="Send (Enter)"
             >

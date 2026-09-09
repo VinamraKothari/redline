@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Comment, Shape, ShapeStyle, ShapeType, Viewer } from "./types";
+import type { Comment, Profile, Shape, ShapeStyle, ShapeType, Viewer } from "./types";
 import type { PublicReview } from "./review";
 import type { ElementInfo, Rect } from "./frame/dom";
 
@@ -40,6 +40,8 @@ interface State {
   viewOnly: boolean;
   comments: Comment[];
   shapes: Shape[];
+  /** the signed-in account (null until /api/me answered) */
+  me: Profile | null;
   viewer: Viewer;
   viewers: Viewer[]; // others present
 
@@ -93,22 +95,11 @@ interface State {
   markRead: (threadId: string) => void;
 }
 
-const VIEWER_KEY = "redline:viewer";
 const READ_KEY = "redline:read:";
 
-function loadViewer(): Viewer {
-  const key = Math.random().toString(36).slice(2, 10);
-  if (typeof window === "undefined") return { name: "", color: "#e2342b", key };
-  try {
-    const raw = localStorage.getItem(VIEWER_KEY);
-    if (raw) {
-      const v = JSON.parse(raw) as { name: string; color: string };
-      return { ...v, key };
-    }
-  } catch {
-    /* ignore */
-  }
-  return { name: "", color: "#e2342b", key };
+/** Per-tab presence key; identity comes from the signed-in profile. */
+function initialViewer(): Viewer {
+  return { user_id: "", name: "", color: "#e2342b", avatar_url: null, key: Math.random().toString(36).slice(2, 10) };
 }
 
 export const useStore = create<State>((set, get) => ({
@@ -116,7 +107,8 @@ export const useStore = create<State>((set, get) => ({
   viewOnly: false,
   comments: [],
   shapes: [],
-  viewer: loadViewer(),
+  me: null,
+  viewer: initialViewer(),
   viewers: [],
 
   mode: "browse",
@@ -201,13 +193,9 @@ export const useStore = create<State>((set, get) => ({
   },
 }));
 
-export function saveViewer(name: string, color: string) {
-  try {
-    localStorage.setItem(VIEWER_KEY, JSON.stringify({ name, color }));
-  } catch {
-    /* ignore */
-  }
-  useStore.setState((s) => ({ viewer: { ...s.viewer, name, color } }));
+/** Adopt the signed-in profile as this tab's identity. */
+export function setMe(p: Profile) {
+  useStore.setState((s) => ({ me: p, viewer: { ...s.viewer, user_id: p.id, name: p.name, color: p.color, avatar_url: p.avatar_url } }));
 }
 
 export function loadReadState(reviewId: string): Record<string, string> {

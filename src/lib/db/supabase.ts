@@ -2,9 +2,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { Comment, Review, Shape } from "@/lib/types";
+import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
 
 const BUCKET = "snapshots";
+const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
 
 let client: SupabaseClient | null = null;
 function sb(): SupabaseClient {
@@ -21,6 +22,101 @@ function must<T>(res: { data: T | null; error: { message: string } | null }): T 
 }
 
 export const supabaseDb: DbAdapter = {
+  /* identity */
+  async getProfile(id) {
+    const { data } = await sb().from("profiles").select().eq("id", id).maybeSingle<Profile>();
+    return data ?? null;
+  },
+  async getProfilesByIds(ids) {
+    if (!ids.length) return [];
+    return must(await sb().from("profiles").select().in("id", ids).returns<Profile[]>());
+  },
+  async upsertProfile(p) {
+    return must(await sb().from("profiles").upsert(p).select().single<Profile>());
+  },
+
+  /* projects & membership */
+  async createProject(p, owner) {
+    const project = must(await sb().from("projects").insert(p).select().single<Project>());
+    must(await sb().from("project_members").upsert({ project_id: p.id, user_id: owner, role: "admin" }));
+    return project;
+  },
+  async getProject(id) {
+    const { data } = await sb().from("projects").select().eq("id", id).maybeSingle<Project>();
+    return data ?? null;
+  },
+  async updateProject(id, patch) {
+    const { data } = await sb()
+      .from("projects")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .maybeSingle<Project>();
+    return data ?? null;
+  },
+  async deleteProject(id) {
+    must(await sb().from("projects").delete().eq("id", id));
+  },
+  async listProjectsFor(userId) {
+    const memberships = must(
+      await sb().from("project_members").select("project_id, role, projects(*)").eq("user_id", userId).returns<{ project_id: string; role: Role; projects: Project }[]>(),
+    );
+    const ids = memberships.map((m) => m.project_id);
+    if (!ids.length) return [];
+    const reviews = must(await sb().from("reviews").select("project_id").in("project_id", ids).returns<{ project_id: string }[]>());
+    const counts = new Map<string, number>();
+    for (const r of reviews) counts.set(r.project_id, (counts.get(r.project_id) || 0) + 1);
+    return memberships
+      .filter((m) => m.projects)
+      .map((m) => ({ ...m.projects, role: m.role, review_count: counts.get(m.project_id) || 0 }))
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  },
+  async listReviews(projectId) {
+    return must(await sb().from("reviews").select().eq("project_id", projectId).order("created_at", { ascending: false }).returns<Review[]>());
+  },
+  async memberRole(projectId, userId) {
+    const { data } = await sb().from("project_members").select("role").eq("project_id", projectId).eq("user_id", userId).maybeSingle<{ role: Role }>();
+    return data?.role ?? null;
+  },
+  async listMembers(projectId) {
+    const rows = must(
+      await sb()
+        .from("project_members")
+        .select("project_id, user_id, role, created_at, profiles(id, email, name, avatar_url, color)")
+        .eq("project_id", projectId)
+        .returns<(ProjectMember & { profiles: ProjectMember["profile"] })[]>(),
+    );
+    return rows.map(({ profiles, ...m }) => ({ ...m, profile: profiles })).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
+  async setMember(projectId, userId, role) {
+    must(await sb().from("project_members").upsert({ project_id: projectId, user_id: userId, role }));
+  },
+  async removeMember(projectId, userId) {
+    must(await sb().from("project_members").delete().eq("project_id", projectId).eq("user_id", userId));
+  },
+  async listInvites(projectId) {
+    return must(
+      await sb().from("project_invites").select().eq("project_id", projectId).is("accepted_at", null).order("created_at").returns<ProjectInvite[]>(),
+    );
+  },
+  async upsertInvite(i) {
+    // one pending invite per (project, e-mail): replace an existing one
+    must(await sb().from("project_invites").delete().eq("project_id", i.project_id).ilike("email", i.email));
+    return must(await sb().from("project_invites").insert(i).select().single<ProjectInvite>());
+  },
+  async deleteInvite(id) {
+    must(await sb().from("project_invites").delete().eq("id", id));
+  },
+  async claimInvites(userId, email) {
+    const pending = must(await sb().from("project_invites").select().ilike("email", email).is("accepted_at", null).returns<ProjectInvite[]>());
+    for (const inv of pending) {
+      const current = await this.memberRole(inv.project_id, userId);
+      // an invite never demotes an existing member
+      if (!current || RANK[inv.role] > RANK[current]) await this.setMember(inv.project_id, userId, inv.role);
+      must(await sb().from("project_invites").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id));
+    }
+  },
+
   async createReview(r) {
     return must(await sb().from("reviews").insert(r).select().single<Review>());
   },
@@ -74,6 +170,10 @@ export const supabaseDb: DbAdapter = {
     return must(
       await sb().from("shapes").select().eq("review_id", reviewId).order("z", { ascending: true }).returns<Shape[]>(),
     );
+  },
+  async getShape(id) {
+    const { data } = await sb().from("shapes").select().eq("id", id).maybeSingle<Shape>();
+    return data ?? null;
   },
   async upsertShape(s) {
     return must(await sb().from("shapes").upsert(s).select().single<Shape>());

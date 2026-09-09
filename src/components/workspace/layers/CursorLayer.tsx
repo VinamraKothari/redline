@@ -6,9 +6,11 @@ import { PageLayer } from "./PageLayer";
 /** Other reviewers' cursors (Supabase Presence). */
 export function CursorLayer() {
   const viewers = useStore((s) => s.viewers);
+  const me = useStore((s) => s.viewer.user_id);
   const viewport = useStore((s) => s.viewport);
   const zoom = useStore((s) => s.zoom);
-  const list = viewers.filter((v) => v.cursor && v.viewport_width === viewport);
+  // other people's cursors on this viewport — not my own other tabs
+  const list = viewers.filter((v) => v.cursor && v.viewport_width === viewport && v.user_id !== me);
   if (!list.length) return null;
   return (
     <PageLayer className="z-[60]">

@@ -10,22 +10,55 @@ import { initials } from "./util";
  * pins into a PNG. Best effort: cross-origin images that refuse CORS are
  * skipped by html-to-image.
  */
+/** Browsers refuse canvases taller than this (Chrome/Firefox: 16384). */
+const MAX_CANVAS = 16000;
+
+/**
+ * While html-to-image inlines the page's images and fonts it fetches them —
+ * and the reviewed site's own images live on a foreign origin without CORS.
+ * Route those fetches through our proxy (same origin, `access-control-allow-origin: *`).
+ */
+function withProxiedFetch<T>(run: () => Promise<T>): Promise<T> {
+  const native = window.fetch;
+  const origin = window.location.origin;
+  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+    try {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const u = new URL(raw, origin);
+      if ((u.protocol === "http:" || u.protocol === "https:") && u.origin !== origin) {
+        return native.call(window, `${origin}/api/proxy?url=${encodeURIComponent(u.toString())}`, init);
+      }
+    } catch {
+      /* fall through */
+    }
+    return native.call(window, input, init);
+  };
+  return run().finally(() => {
+    window.fetch = native;
+  });
+}
+
 export async function toPng(viewport: number): Promise<Blob | null> {
   const doc = frame().doc;
   if (!doc?.documentElement) return null;
   const st = useStore.getState();
   const w = viewport;
-  const h = Math.min(st.docSize.h, 20000);
+  const h = Math.min(Math.max(st.docSize.h, 200), MAX_CANVAS);
 
-  const page = await toCanvas(doc.documentElement as HTMLElement, {
-    width: w,
-    height: h,
-    pixelRatio: 1,
-    cacheBust: false,
-    skipFonts: false,
-    filter: (n) => !(n instanceof HTMLScriptElement),
-    style: { transform: "none" },
-  });
+  const page = await withProxiedFetch(() =>
+    toCanvas(doc.documentElement as HTMLElement, {
+      width: w,
+      height: h,
+      pixelRatio: 1,
+      cacheBust: false,
+      skipFonts: false,
+      // the page's own scripts, and the hidden iframes tag managers inject
+      filter: (n) => !(n instanceof HTMLScriptElement) && !(n instanceof HTMLIFrameElement),
+      style: { transform: "none" },
+      imagePlaceholder:
+        "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#eee"/></svg>'),
+    }),
+  );
 
   const out = document.createElement("canvas");
   out.width = w;

@@ -6,7 +6,7 @@ import { ArrowLeft, ExternalLink, Minimize2, MessageCircle, MessageCircleOff } f
 import { useStore } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
-import { api, setOwnerKey } from "@/lib/api";
+import { api } from "@/lib/api";
 import { cn, hostOf } from "@/lib/util";
 import { RealtimeContext } from "./Workspace";
 import { InspectLayer } from "./layers/InspectLayer";
@@ -126,7 +126,8 @@ export function Stage() {
     }
   }, [frameReady, review, navigatedAway, set]);
 
-  // presence cursor from inside the iframe (browse mode)
+  // live cursor for other reviewers — from inside the iframe (browse mode,
+  // where the page gets the pointer) …
   useEffect(() => {
     if (!frameReady) return;
     const doc = frame().doc;
@@ -141,6 +142,19 @@ export function Stage() {
       doc.removeEventListener("mouseleave", leave);
     };
   }, [frameReady]);
+  // … and from the stage itself (comment / draw / inspect modes, where an
+  // overlay sits above the page and the iframe never sees the pointer)
+  const onStagePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!useStore.getState().frameReady) return;
+      const r = stageRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const sc = useStore.getState().scroll;
+      RealtimeContext.current?.track({ cursor: { x: (e.clientX - r.left) / zoom + sc.x, y: (e.clientY - r.top) / zoom + sc.y } });
+    },
+    [zoom],
+  );
+  const onStagePointerLeave = useCallback(() => RealtimeContext.current?.track({ cursor: null }), []);
 
   const toPage = useCallback(
     (clientX: number, clientY: number) => {
@@ -175,8 +189,8 @@ export function Stage() {
   async function reviewThisPage() {
     if (!navigatedAway) return;
     try {
-      const { review: r } = await api.createReview({ url: navigatedAway, viewport, name: useStore.getState().viewer.name });
-      setOwnerKey(r.id, r.owner_key);
+      if (!review?.project_id) return;
+      const { review: r } = await api.createReview({ project_id: review.project_id, url: navigatedAway, viewport });
       router.push(`/r/${r.id}`);
     } catch (e) {
       useStore.getState().toast((e as Error).message, "error");
@@ -189,6 +203,8 @@ export function Stage() {
       className={cn("relative flex min-w-0 flex-1 items-start justify-center overflow-auto", fullscreen ? "bg-canvas" : "canvas-grid")}
       style={{ padding: pad }}
       onWheelCapture={onWheel}
+      onPointerMove={onStagePointerMove}
+      onPointerLeave={onStagePointerLeave}
     >
       {/* device bezel */}
       <div
@@ -218,7 +234,8 @@ export function Stage() {
             {/* overlays, in page coordinates */}
             {frameReady && !navigatedAway && (
               <>
-                <DrawLayer geom={geom} />
+                {/* "hide markup" hides drawings too — unless you're drawing right now */}
+                {(showComments || mode === "draw") && <DrawLayer geom={geom} />}
                 <InspectLayer />
                 {showComments && <CommentLayer geom={geom} />}
                 <CursorLayer />
@@ -272,7 +289,7 @@ export function Stage() {
       {/* full-screen controls */}
       {fullscreen && (
         <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink/90 p-1 text-white shadow-pop backdrop-blur">
-          <Tip label={showComments ? "Hide comment pins" : "Show comment pins"} kbd="⇧C" side="top">
+          <Tip label={showComments ? "Hide comments & drawings" : "Show comments & drawings"} kbd="⇧C" side="top">
             <IconButton className="!text-white hover:!bg-white/10" onClick={() => set({ showComments: !showComments })}>
               {showComments ? <MessageCircle size={15} /> : <MessageCircleOff size={15} />}
             </IconButton>
