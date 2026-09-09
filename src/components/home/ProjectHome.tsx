@@ -196,7 +196,8 @@ export function ProjectHome({ id }: { id: string }) {
               )}
             </div>
             <p className="mt-1.5 text-[12.5px] text-ink-3">
-              You are {role === "admin" ? "an admin" : role === "edit" ? "an editor" : "a viewer"} · {ROLE_LABEL[role]}
+              You are {role === "admin" ? "an admin" : role === "edit" ? "an editor" : "a viewer"} · {ROLE_LABEL[role]} · every member sees all pages in
+              this project
             </p>
 
             {canEdit && (
@@ -211,7 +212,7 @@ export function ProjectHome({ id }: { id: string }) {
                   <input
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="Paste a URL to review — e.g. staging.yoursite.com/pricing"
+                    placeholder="Add a page — paste a URL, e.g. staging.yoursite.com/pricing"
                     spellCheck={false}
                     className="h-11 flex-1 bg-transparent px-3 text-[15px] text-ink placeholder:text-ink-3 outline-none"
                   />
@@ -265,7 +266,7 @@ export function ProjectHome({ id }: { id: string }) {
           </section>
 
           <section className="mt-10">
-            <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-3">Reviews</h2>
+            <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-3">Pages in this project{data ? ` · ${data.reviews.length}` : ""}</h2>
             {!data ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 {[0, 1].map((i) => (
@@ -274,7 +275,7 @@ export function ProjectHome({ id }: { id: string }) {
               </div>
             ) : data.reviews.length === 0 ? (
               <p className="rounded-lg bg-panel px-4 py-6 text-center text-[13px] text-ink-3 hairline">
-                {canEdit ? "No reviews yet — paste a URL above to start one." : "Nothing to review here yet."}
+                {canEdit ? "No pages yet — paste a URL above to add the first one. A project can hold as many pages as you like." : "No pages in this project yet."}
               </p>
             ) : (
               <ul className="grid gap-2 sm:grid-cols-2">

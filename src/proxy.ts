@@ -20,12 +20,15 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase-config";
  *    proxy sets on every reviewed page.
  */
 
-const PAGE = /^\/(?:$|p\/|r\/|login$)/;
+const PAGE = /^\/(?:$|p\/|r\/|start$|login$)/;
+/** pages a signed-out visitor may see (the landing page decides what to render) */
+const PUBLIC_PAGE = /^\/(?:$|login$)/;
 const OWN_PREFIXES = [
   "/api/",
   "/auth/",
   "/r/",
   "/p/",
+  "/start",
   "/login",
   "/bridge.js",
   "/favicon.ico",
@@ -53,10 +56,11 @@ export async function proxy(req: NextRequest) {
 
 async function gate(req: NextRequest) {
   const isLogin = req.nextUrl.pathname === "/login";
+  const isPublic = PUBLIC_PAGE.test(req.nextUrl.pathname);
   // e2e: a trusted cookie stands in for a Supabase session (never on Vercel)
   if (process.env.REDLINE_TEST_AUTH === "1" && !process.env.VERCEL) {
     const signed = Boolean(req.cookies.get("redline_test_user")?.value);
-    if (!signed && !isLogin) return toLogin(req);
+    if (!signed && !isPublic) return toLogin(req);
     if (signed && isLogin) return NextResponse.redirect(new URL("/", req.url));
     return NextResponse.next();
   }
@@ -75,7 +79,7 @@ async function gate(req: NextRequest) {
   });
   const { data } = await sb.auth.getUser();
   const signed = Boolean(data.user);
-  if (!signed && !isLogin) return toLogin(req);
+  if (!signed && !isPublic) return toLogin(req);
   if (signed && isLogin) {
     const next = req.nextUrl.searchParams.get("next");
     return NextResponse.redirect(new URL(next && next.startsWith("/") ? next : "/", req.url));

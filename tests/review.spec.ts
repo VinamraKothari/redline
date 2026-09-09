@@ -43,7 +43,7 @@ async function createReview(page: Page, fixture = FIXTURE) {
   await signIn(page);
   const project = await createProject(page);
   await page.goto(`/p/${project.id}`);
-  await page.getByPlaceholder(/Paste a URL/).fill(fixture);
+  await page.getByPlaceholder(/paste a URL/i).fill(fixture);
   await page.getByRole("button", { name: "Review" }).click();
   await page.waitForURL(/\/r\/[a-z0-9]+/);
   const frame = page.frameLocator('iframe[title="Page under review"]');
@@ -51,13 +51,29 @@ async function createReview(page: Page, fixture = FIXTURE) {
   return frame;
 }
 
-test("signed-out visitors land on the login page; signed-in users see their projects", async ({ page }) => {
+test("landing page: hero + URL box for visitors, protected pages redirect, projects once signed in", async ({ page }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Design feedback");
   await expect(page.getByRole("button", { name: /Continue with Google/ })).toBeVisible();
-  await signIn(page);
+  // a protected page sends you to sign in and remembers where you were going
+  await page.goto("/p/nope");
+  await expect(page).toHaveURL(/\/login\?next=%2Fp%2Fnope/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Design feedback");
+
+  // the URL box on the landing page: sign in (test mode) → /start → pick a project → review
+  await page.goto("/");
+  await page.getByLabel("Web address to review").fill(FIXTURE);
+  await page.getByRole("button", { name: "Sign in as test user" }).click();
+  await page.waitForURL(/\/start\?url=/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Start the review");
+  await page.getByLabel("New project name").fill("First project");
+  await page.getByRole("button", { name: /^Review/ }).click();
+  await page.waitForURL(/\/r\/[a-z0-9]+/);
+  await expect(page.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
+
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("projects");
+  await expect(page.getByText("First project").first()).toBeVisible();
   await page.getByLabel("New project name").fill("Gem House");
   await page.getByRole("button", { name: /Create/ }).click();
   await page.waitForURL(/\/p\/[a-z0-9]+/);
@@ -77,13 +93,22 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   expect(inv.ok()).toBeTruthy();
   expect((await inv.json()).invite).toBeTruthy();
 
-  // the viewer signs in: the invite is claimed, the review opens read-only
+  // the admin adds a second page to the same project
+  const second = await page.request.post("/api/reviews", { data: { project_id: pid, url: FIXTURE.replace(/site\.html$/, "pricing.html"), viewport: 1024 } });
+  expect(second.ok()).toBeTruthy();
+
+  // the viewer signs in: the invite is claimed, the review opens read-only,
+  // and the page switcher lists both pages of the project
   const viewerCtx = await browser.newContext();
   const vp = await viewerCtx.newPage();
   await signIn(vp, "Sam Viewer");
   await vp.goto(url);
   await expect(vp.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
   await expect(vp.locator("nav").getByLabel(/Comment/)).toHaveCount(0);
+  await vp.getByRole("button", { name: "Pages in this project" }).click();
+  await expect(vp.locator('[role="menuitem"][href^="/r/"]')).toHaveCount(2);
+  await expect(vp.getByRole("menuitem", { name: /Add a page/ })).toBeVisible();
+  await vp.keyboard.press("Escape");
   const denied = await vp.request.post(`/api/reviews/${reviewId}/comments`, {
     data: { body: "nope", viewport_width: 1440, anchor: { selector: null, fx: 0, fy: 0, px: 1, py: 1 } },
   });

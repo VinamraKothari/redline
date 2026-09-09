@@ -55,7 +55,7 @@ export function Projects() {
             {me ? `Hi ${me.name.split(" ")[0]} —` : "Your"} projects
           </h1>
           <p className="mt-2 max-w-[520px] text-[14px] leading-relaxed text-ink-2">
-            A project holds the pages you review together. Invite people to a project and give them view, edit or admin access.
+            A project holds all the pages you review together — add as many as you like. Invite people once and they see every page in it.
           </p>
 
           <form onSubmit={create} className="mt-6 flex max-w-[480px] items-center gap-2">
@@ -100,7 +100,7 @@ export function Projects() {
                     </div>
                     <div className="flex items-center gap-3 text-[12px] text-ink-3">
                       <span>
-                        {p.review_count} review{p.review_count === 1 ? "" : "s"}
+                        {p.review_count} page{p.review_count === 1 ? "" : "s"}
                       </span>
                       <span>· updated {timeAgo(p.updated_at)}</span>
                       <ArrowRight size={13} className="ml-auto opacity-0 transition-opacity group-hover:opacity-100" />

@@ -12,6 +12,7 @@ import { frame } from "@/lib/frame/controller";
 import { serializeDocument } from "@/lib/frame/dom";
 import { hostOf, cn } from "@/lib/util";
 import { ShareDialog } from "./ShareDialog";
+import { PageSwitcher } from "./PageSwitcher";
 import { RealtimeContext } from "./Workspace";
 
 const KIND_ICON = { desktop: Monitor, tablet: Tablet, mobile: Smartphone } as const;
@@ -80,9 +81,7 @@ export function TopBar() {
 
       {/* title + url */}
       <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-[13px] font-semibold text-ink" title={review?.title}>
-          {review?.title}
-        </span>
+        <PageSwitcher />
         {review && !review.url.startsWith("upload://") && (
           <a
             href={review.url}
