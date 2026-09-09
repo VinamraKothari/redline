@@ -16,6 +16,11 @@ import { CursorLayer } from "./layers/CursorLayer";
 import { CaptureLayer } from "./layers/CaptureLayer";
 import { Button, IconButton, Tip } from "@/components/ui/primitives";
 
+/** iframe src for a live page; `scripts=false` asks the proxy for a static render */
+export function proxySrc(url: string, scripts: boolean): string {
+  return `/api/proxy?url=${encodeURIComponent(url)}${scripts ? "" : "&js=0"}`;
+}
+
 export interface StageGeom {
   /** the unscaled stage element (iframe-sized) */
   stage: React.RefObject<HTMLDivElement | null>;
@@ -35,6 +40,7 @@ export function Stage() {
   const frameError = useStore((s) => s.frameError);
   const navigatedAway = useStore((s) => s.navigatedAway);
   const showComments = useStore((s) => s.showComments);
+  const scripts = useStore((s) => s.scripts);
   const set = useStore((s) => s.set);
 
   const stageRef = useRef<HTMLDivElement>(null);
@@ -84,7 +90,19 @@ export function Stage() {
           return;
         }
         set({ navigatedAway: url, frameReady: false, hover: null, selected: null, measureTarget: null, draft: null });
-        el.src = `/api/proxy?url=${encodeURIComponent(url)}`;
+        el.src = proxySrc(url, useStore.getState().scripts);
+      };
+      f.onCrashed = (reason) => {
+        const st = useStore.getState();
+        if (!st.scripts) return; // already static — nothing more to do
+        const host = hostOf(st.navigatedAway || st.review?.url || "");
+        st.set({ scripts: false, frameReady: false, frameError: null, hover: null, selected: null, measureTarget: null });
+        st.toast(
+          `${host}'s own scripts crashed inside the reviewer (${reason === "next-error" ? "Next.js error screen" : "page replaced"}) — showing the static render instead.`,
+        );
+        // The main page reloads through the src prop; an in-frame navigation
+        // has to be re-requested explicitly.
+        if (st.navigatedAway) el.src = proxySrc(st.navigatedAway, false);
       };
     },
     [set],
@@ -152,8 +170,7 @@ export function Stage() {
 
   if (!review) return <div className="flex-1 canvas-grid" />;
 
-  const src =
-    review.mode === "live" ? `/api/proxy?url=${encodeURIComponent(review.url)}` : `/api/snapshot/${review.id}`;
+  const src = review.mode === "live" ? proxySrc(review.url, scripts) : `/api/snapshot/${review.id}`;
 
   async function reviewThisPage() {
     if (!navigatedAway) return;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
+import { ChevronDown, Code2, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tip, Button } from "@/components/ui/primitives";
 import { useStore } from "@/lib/store";
@@ -23,6 +23,7 @@ export function TopBar() {
   const viewers = useStore((s) => s.viewers);
   const viewer = useStore((s) => s.viewer);
   const viewOnly = useStore((s) => s.viewOnly);
+  const scripts = useStore((s) => s.scripts);
   const set = useStore((s) => s.set);
   const [share, setShare] = useState(false);
   const [freezing, setFreezing] = useState(false);
@@ -150,6 +151,23 @@ export function TopBar() {
           <RotateCw size={15} />
         </IconButton>
       </Tip>
+
+      {review?.mode === "live" && (
+        <Tip
+          label={scripts ? "Site scripts: on — click for a static render (server HTML + CSS only)" : "Site scripts: off (static render) — click to run the page's JavaScript"}
+          side="bottom"
+        >
+          <IconButton
+            active={!scripts}
+            aria-label={scripts ? "Site scripts: on" : "Site scripts: off"}
+            onClick={() => {
+              set({ scripts: !scripts, frameReady: false, frameError: null, navigatedAway: null, hover: null, selected: null, measureTarget: null });
+            }}
+          >
+            <Code2 size={15} />
+          </IconButton>
+        </Tip>
+      )}
 
       {/* presence */}
       {(viewers.length > 0 || viewer.name) && (

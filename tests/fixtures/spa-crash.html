@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Crashy SPA — fixture</title>
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body>
+  <main>
+    <h1 data-testid="spa-headline">Server-rendered headline</h1>
+    <p class="lede">This markup comes from the server and is what a reviewer needs to see.</p>
+    <noscript><p data-testid="noscript-note">Shown only when scripts are off.</p></noscript>
+  </main>
+  <script>
+    // Simulates a Next.js App Router client crash: the whole document is
+    // replaced by a global error screen shortly after "hydration".
+    setTimeout(function () {
+      var html = document.createElement("html");
+      html.id = "__next_error__";
+      html.innerHTML = "<head><title>Crashy SPA — fixture</title></head><body><h2>This page couldn’t load</h2><p>Reload to try again, or go back.</p></body>";
+      document.replaceChild(html, document.documentElement);
+    }, 150);
+  </script>
+</body>
+</html>

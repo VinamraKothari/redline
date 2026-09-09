@@ -53,12 +53,34 @@ export interface RewriteOptions {
   requestedUrl: string;
   /** origin of the Redline app, e.g. https://redline.vercel.app */
   appOrigin: string;
+  /**
+   * Static render: drop the page's own scripts. Used when a site's client-side
+   * app (Next.js, Nuxt, …) crashes inside the reviewer and replaces the
+   * server-rendered document with an error screen.
+   */
+  stripScripts?: boolean;
 }
 
 export function rewriteHtml(html: string, opts: RewriteOptions): string {
   const $ = cheerio.load(html);
   const base = opts.finalUrl;
   const origin = opts.appOrigin;
+
+  // 0. Static mode: remove scripts, script preloads and inline handlers;
+  //    surface <noscript> fallbacks (lazy images, etc.) as real content.
+  if (opts.stripScripts) {
+    $("script").remove();
+    $("link[rel='modulepreload'], link[rel='preload'][as='script'], link[rel='prefetch']").remove();
+    $("noscript").each((_, el) => {
+      $(el).replaceWith($(el).text());
+    });
+    $("*").each((_, el) => {
+      const attrs = (el as { attribs?: Record<string, string> }).attribs;
+      if (!attrs) return;
+      for (const name of Object.keys(attrs)) if (name.startsWith("on")) $(el).removeAttr(name);
+    });
+    $("html").attr("data-redline-static", "1");
+  }
 
   // 1. Remove things that would break framing or block our injected assets.
   $("meta[http-equiv]").each((_, el) => {

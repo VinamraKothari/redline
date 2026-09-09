@@ -15,6 +15,8 @@ export class FrameController {
   private raf = 0;
   private mutationTimer = 0;
   onNavigate: ((url: string, newTab: boolean) => void) | null = null;
+  /** the page's own scripts destroyed the document (see bridge.ts) */
+  onCrashed: ((reason: string) => void) | null = null;
 
   attach(iframe: HTMLIFrameElement) {
     this.detach();
@@ -27,6 +29,7 @@ export class FrameController {
       if (e.source !== iframe.contentWindow) return;
       if (d.type === "navigate") this.onNavigate?.(d.url, Boolean(d.newTab || d.popup));
       if (d.type === "blocked-submit") useStore.getState().toast("Form submissions are disabled while reviewing.");
+      if (d.type === "crashed") this.onCrashed?.(String(d.reason || ""));
     };
     window.addEventListener("message", onMsg);
     this.cleanup.push(() => iframe.removeEventListener("load", onLoad), () => window.removeEventListener("message", onMsg));

@@ -54,6 +54,8 @@ interface State {
   frameReady: boolean;
   frameError: string | null;
   navigatedAway: string | null;
+  /** run the reviewed site's own scripts (off = static render) */
+  scripts: boolean;
   layoutTick: number; // bump to re-anchor pins
 
   // comments
@@ -128,6 +130,7 @@ export const useStore = create<State>((set, get) => ({
   frameReady: false,
   frameError: null,
   navigatedAway: null,
+  scripts: true,
   layoutTick: 0,
 
   showComments: true,

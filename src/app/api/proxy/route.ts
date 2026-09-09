@@ -117,7 +117,8 @@ export async function GET(req: NextRequest) {
     }
     const charset = detectCharset(ct, buf);
     const html = decodeBody(buf, charset);
-    const out = rewriteHtml(html, { finalUrl, requestedUrl: u.toString(), appOrigin });
+    const stripScripts = req.nextUrl.searchParams.get("js") === "0";
+    const out = rewriteHtml(html, { finalUrl, requestedUrl: u.toString(), appOrigin, stripScripts });
     return new Response(out, {
       status: 200,
       headers: {

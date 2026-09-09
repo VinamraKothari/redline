@@ -147,3 +147,23 @@ test("view-only link hides authoring tools", async ({ page }) => {
   await expect(page.locator("nav").getByLabel(/Comment/)).toHaveCount(0);
   await expect(page.locator("nav").getByLabel(/Inspect/)).toBeVisible();
 });
+
+test("falls back to a static render when the site's scripts destroy the document", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/Paste a URL/).fill(FIXTURE.replace(/site\.html$/, "spa-crash.html"));
+  await page.getByRole("button", { name: "Review" }).click();
+  await page.waitForURL(/\/r\/[a-z0-9]+/);
+  const frame = page.frameLocator('iframe[title="Page under review"]');
+  // the bridge reports the crash, the stage reloads with js=0
+  await expect(page.getByText(/scripts crashed inside the reviewer/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('iframe[title="Page under review"]')).toHaveAttribute("src", /js=0/);
+  await expect(frame.locator('[data-testid="spa-headline"]')).toHaveText("Server-rendered headline");
+  await expect(frame.locator('[data-testid="noscript-note"]')).toBeVisible();
+  await expect(frame.locator("html")).toHaveAttribute("data-redline-static", "1");
+  // the crash screen never comes back
+  await page.waitForTimeout(600);
+  await expect(frame.locator("#__next_error__")).toHaveCount(0);
+  // the toggle switches scripts back on (and the page crashes again → falls back again)
+  await page.getByRole("button", { name: /Site scripts: off/ }).click();
+  await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
+});

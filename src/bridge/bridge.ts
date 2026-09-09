@@ -91,8 +91,34 @@
     true,
   );
 
+  // ── Crash detection ──────────────────────────────────────────────────────
+  // Client-side frameworks (Next.js App Router in particular) may throw after
+  // hydration because the location is our proxy URL, then replace the whole
+  // document with a "This page couldn't load" screen. The server-rendered
+  // markup was fine, so the host reloads the page with scripts stripped.
+  let reported = false;
+  const root0 = document.documentElement;
+  const check = () => {
+    if (reported) return;
+    const root = document.documentElement;
+    const replaced = root !== root0 || !root.hasAttribute("data-redline");
+    const nextError = root.id === "__next_error__" || !!document.getElementById("__next_error__");
+    if (replaced || nextError) {
+      reported = true;
+      post({ type: "crashed", reason: nextError ? "next-error" : "document-replaced" });
+    }
+  };
+  const start = Date.now();
+  const timer = window.setInterval(() => {
+    check();
+    if (reported || Date.now() - start > 20_000) window.clearInterval(timer);
+  }, 250);
+
   // Let the host know we're alive as early as possible, and again when ready.
   post({ type: "bridge-hello", url: originalUrl, finalUrl });
   window.addEventListener("DOMContentLoaded", () => post({ type: "dom-ready", title: document.title }));
-  window.addEventListener("load", () => post({ type: "load", title: document.title }));
+  window.addEventListener("load", () => {
+    post({ type: "load", title: document.title });
+    check();
+  });
 })();
