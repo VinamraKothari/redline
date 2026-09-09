@@ -175,6 +175,8 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
 
 test("creates a review, proxies the page, neutralises frame busting, captures a preview", async ({ page }) => {
   const frame = await createReview(page);
+  // the page sees its own path, not /api/proxy?url=… (frameworks read window.location)
+  expect(await page.evaluate(() => document.querySelector<HTMLIFrameElement>('iframe[title="Page under review"]')!.contentWindow!.location.pathname)).toBe("/site.html");
   // a preview of the page is captured a few seconds after load and shown on the project page
   const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
   await expect
@@ -371,7 +373,8 @@ test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports
   });
   expect(bundler.attr).toBe("/app.js");
   expect(bundler.started).toBe(true);
-  expect(bundler.base).toContain("/api/proxy?url=");
+  // the document's own URL is the site's path on our origin (not /api/proxy?url=…)
+  expect(bundler.base).toBe("http://localhost:3123/spa.html");
   // images/links were made absolute to the site instead
   const img = await frame.locator("img").first().getAttribute("src");
   expect(img).toMatch(/^http:\/\/localhost:3999\//);

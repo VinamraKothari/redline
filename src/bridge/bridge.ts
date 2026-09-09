@@ -35,6 +35,22 @@
     /* ignore */
   }
   const proxied = (u: string): string => `${appOrigin}/api/proxy?url=${encodeURIComponent(u)}`;
+
+  // Show the page its own path. Frameworks read window.location on start-up
+  // (Next.js builds its router state from it; breadcrumbs print it), and
+  // "/api/proxy?url=…" would leak into the page and cause hydration
+  // mismatches. Same origin, so replaceState is allowed; src/proxy.ts routes
+  // any request for that path back to the site. Paths that Redline itself
+  // owns are left alone.
+  try {
+    const site = new URL(finalUrl);
+    const own = /^\/(?:$|p\/|r\/|start$|login$|api\/|auth\/|bridge\.js$|favicon\.ico$|_next\/static\/css\/)/;
+    if (location.pathname.startsWith("/api/proxy") && !own.test(site.pathname)) {
+      history.replaceState(history.state, "", site.pathname + site.search + site.hash);
+    }
+  } catch {
+    /* ignore */
+  }
   /** Absolute site URL for a request, or null if it should be left alone. */
   const siteUrlFor = (raw: string): string | null => {
     let u: URL;
