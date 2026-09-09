@@ -59,6 +59,9 @@ export interface Review {
   created_by_id: string | null;
   /** legacy secret from the pre-login era; unused now */
   owner_key: string;
+  /** small JPEG preview of the page, captured in the reviewer */
+  thumbnail_url: string | null;
+  thumbnail_at: string | null;
   created_at: string;
   updated_at: string;
 }

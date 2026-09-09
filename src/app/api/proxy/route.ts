@@ -41,7 +41,19 @@ function errorPage(status: number, title: string, detail: string, url: string): 
   });
 }
 
-export async function GET(req: NextRequest) {
+/**
+ * Every method goes through here. Reviewed sites call their own APIs with
+ * POST (search, cart, GraphQL…) as much as with GET; the bridge routes them
+ * all to the proxy so they stay same-origin instead of dying on CORS.
+ */
+export const GET = handle;
+export const POST = handle;
+export const PUT = handle;
+export const PATCH = handle;
+export const DELETE = handle;
+export const OPTIONS = handle;
+
+async function handle(req: NextRequest) {
   const target = req.nextUrl.searchParams.get("url") || req.headers.get(PROXY_TARGET_HEADER);
   if (!target) return new Response("missing url", { status: 400 });
   // Members only — otherwise this would be an open proxy.
@@ -78,14 +90,18 @@ export async function GET(req: NextRequest) {
     upstreamHeaders["sec-fetch-site"] = "none";
     upstreamHeaders["upgrade-insecure-requests"] = "1";
   }
-  // Framework data requests (Next.js RSC / router prefetch) need their headers.
+  // Framework data requests (Next.js RSC / router prefetch), API calls and
+  // form posts need their own headers — but never our cookies.
   req.headers.forEach((v, k) => {
-    if (/^(rsc|next-.*|x-requested-with)$/i.test(k)) upstreamHeaders[k] = v;
+    if (/^(rsc|next-.*|x-requested-with|x-[\w-]+|content-type|authorization|accept-encoding)$/i.test(k) && !/^x-redline/i.test(k)) upstreamHeaders[k] = v;
   });
+  const method = req.method.toUpperCase();
+  const hasBody = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const body = hasBody ? await req.arrayBuffer() : undefined;
 
   let res: Response;
   try {
-    res = await fetch(u.toString(), { redirect: "follow", signal: ctrl.signal, headers: upstreamHeaders });
+    res = await fetch(u.toString(), { method, body, redirect: "follow", signal: ctrl.signal, headers: upstreamHeaders });
   } catch (e) {
     clearTimeout(timer);
     const aborted = (e as Error).name === "AbortError";

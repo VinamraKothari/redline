@@ -16,7 +16,7 @@ export interface DbAdapter {
   getProject(id: string): Promise<Project | null>;
   updateProject(id: string, patch: Partial<Project>): Promise<Project | null>;
   deleteProject(id: string): Promise<void>;
-  listProjectsFor(userId: string): Promise<(Project & { role: Role; review_count: number })[]>;
+  listProjectsFor(userId: string): Promise<(Project & { role: Role; review_count: number; preview_urls: string[] })[]>;
   listReviews(projectId: string): Promise<Review[]>;
   memberRole(projectId: string, userId: string): Promise<Role | null>;
   listMembers(projectId: string): Promise<ProjectMember[]>;
@@ -51,4 +51,8 @@ export interface DbAdapter {
   /** snapshot html storage */
   putSnapshot(path: string, html: string): Promise<void>;
   getSnapshot(path: string): Promise<string | null>;
+
+  /** page preview images; returns the public URL to store on the review */
+  putThumbnail(reviewId: string, bytes: Uint8Array, contentType: string): Promise<string>;
+  getThumbnail(reviewId: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }

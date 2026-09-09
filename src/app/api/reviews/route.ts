@@ -44,6 +44,8 @@ export const POST = guarded(async (req: NextRequest) => {
     created_by: profile.name,
     created_by_id: user.id,
     owner_key: newKey(),
+    thumbnail_url: null,
+    thumbnail_at: null,
     created_at: now,
     updated_at: now,
   };

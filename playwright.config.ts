@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: "tests",
   timeout: 60_000,
   retries: 0,
+  // Proxied pages take a few seconds to render when several tests run at once.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: process.env.BASE_URL || "http://localhost:3123",
     viewport: { width: 1600, height: 1000 },

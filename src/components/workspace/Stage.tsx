@@ -8,6 +8,7 @@ import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
 import { api } from "@/lib/api";
 import { cn, hostOf } from "@/lib/util";
+import { captureThumbnail, STALE_MS } from "@/lib/thumbnail";
 import { RealtimeContext } from "./Workspace";
 import { InspectLayer } from "./layers/InspectLayer";
 import { CommentLayer } from "./layers/CommentLayer";
@@ -116,6 +117,20 @@ export function Stage() {
     window.addEventListener("redline:reload", reload);
     return () => window.removeEventListener("redline:reload", reload);
   }, [set]);
+
+  // capture a preview for the project page once the page has settled
+  useEffect(() => {
+    if (!frameReady || !review || navigatedAway) return;
+    if (review.role === "view") return;
+    const fresh = review.thumbnail_at && Date.now() - new Date(review.thumbnail_at).getTime() < STALE_MS;
+    if (review.thumbnail_url && fresh) return;
+    const t = window.setTimeout(() => {
+      captureThumbnail(review.id, viewport).catch(() => {});
+    }, 3500);
+    return () => window.clearTimeout(t);
+    // only once per page load; viewport changes shouldn't re-capture
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameReady, review?.id, navigatedAway]);
 
   // set page title into the review after load
   useEffect(() => {

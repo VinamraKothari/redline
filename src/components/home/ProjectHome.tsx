@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, ChevronLeft, FileCode2, Monitor, Pencil, Smartphone, Tablet, Trash2, Users } from "lucide-react";
+import { ArrowRight, ChevronLeft, FileCode2, Monitor, Pencil, Smartphone, Tablet, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
 import { ROLE_LABEL, VIEWPORTS, type Project, type ProjectInvite, type ProjectMember, type Role } from "@/lib/types";
-import { cn, hostOf, normalizeUrl, timeAgo } from "@/lib/util";
+import { cn, normalizeUrl } from "@/lib/util";
 import { Logo } from "@/components/Logo";
 import { Button, IconButton, Tip, TooltipProvider } from "@/components/ui/primitives";
 import { AccountMenu, useMe } from "./AccountMenu";
 import { MembersDialog } from "./MembersDialog";
+import { PageTile } from "./PageTile";
 
 interface Loaded {
   project: Project & { role: Role };
@@ -84,16 +85,6 @@ export function ProjectHome({ id }: { id: string }) {
     }
   }
 
-  async function remove(r: PublicReview) {
-    if (!confirm(`Delete "${r.title}" and all its comments? This can't be undone.`)) return;
-    try {
-      await api.deleteReview(r.id);
-      reload();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   async function rename(e: React.FormEvent) {
     e.preventDefault();
     const n = name.trim();
@@ -109,7 +100,7 @@ export function ProjectHome({ id }: { id: string }) {
 
   async function removeProject() {
     if (!data) return;
-    if (!confirm(`Delete the project "${data.project.name}" with all ${data.reviews.length} review(s)? This can't be undone.`)) return;
+    if (!confirm(`Delete the project "${data.project.name}" with all ${data.reviews.length} page(s)? This can't be undone.`)) return;
     try {
       await api.deleteProject(id);
       router.push("/");
@@ -278,28 +269,9 @@ export function ProjectHome({ id }: { id: string }) {
                 {canEdit ? "No pages yet — paste a URL above to add the first one. A project can hold as many pages as you like." : "No pages in this project yet."}
               </p>
             ) : (
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {data.reviews.map((r) => (
-                  <li key={r.id} className="group flex items-center gap-3 rounded-lg bg-panel px-3 py-2.5 hairline transition-colors hover:bg-hover">
-                    <Link href={`/r/${r.id}`} className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium text-ink">{r.title || hostOf(r.url)}</div>
-                      <div className="truncate text-[12px] text-ink-3">
-                        {r.url.startsWith("upload://") ? "Uploaded file" : hostOf(r.url)} · {r.created_by} · {timeAgo(r.created_at)}
-                        {r.mode === "frozen" && " · frozen"}
-                      </div>
-                    </Link>
-                    {(admin || r.created_by_id === me?.id) && (
-                      <button
-                        type="button"
-                        onClick={() => remove(r)}
-                        className="rounded p-1 text-ink-3 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
-                        title="Delete review"
-                        aria-label={`Delete ${r.title}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </li>
+                  <PageTile key={r.id} r={r} canEdit={canEdit} canDelete={admin || r.created_by_id === me?.id} onChanged={reload} onError={setError} />
                 ))}
               </ul>
             )}

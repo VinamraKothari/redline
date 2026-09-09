@@ -3,7 +3,7 @@
 import type { Anchor, Attachment, Comment, Profile, Project, ProjectInvite, ProjectMember, Role, Shape } from "./types";
 import type { PublicReview } from "./review";
 
-export type ProjectSummary = Project & { role: Role; review_count: number };
+export type ProjectSummary = Project & { role: Role; review_count: number; preview_urls: string[] };
 
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string>) };

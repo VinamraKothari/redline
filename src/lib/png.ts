@@ -18,7 +18,7 @@ const MAX_CANVAS = 16000;
  * and the reviewed site's own images live on a foreign origin without CORS.
  * Route those fetches through our proxy (same origin, `access-control-allow-origin: *`).
  */
-function withProxiedFetch<T>(run: () => Promise<T>): Promise<T> {
+export function withProxiedFetch<T>(run: () => Promise<T>): Promise<T> {
   const native = window.fetch;
   const origin = window.location.origin;
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {

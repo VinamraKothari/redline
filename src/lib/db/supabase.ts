@@ -5,6 +5,7 @@ import { SUPABASE_URL } from "@/lib/supabase-config";
 import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
 
 const BUCKET = "snapshots";
+const THUMBS = "thumbnails";
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
 
 let client: SupabaseClient | null = null;
@@ -63,12 +64,27 @@ export const supabaseDb: DbAdapter = {
     );
     const ids = memberships.map((m) => m.project_id);
     if (!ids.length) return [];
-    const reviews = must(await sb().from("reviews").select("project_id").in("project_id", ids).returns<{ project_id: string }[]>());
+    const reviews = must(
+      await sb()
+        .from("reviews")
+        .select("project_id, thumbnail_url, created_at")
+        .in("project_id", ids)
+        .order("created_at", { ascending: false })
+        .returns<{ project_id: string; thumbnail_url: string | null }[]>(),
+    );
     const counts = new Map<string, number>();
-    for (const r of reviews) counts.set(r.project_id, (counts.get(r.project_id) || 0) + 1);
+    const previews = new Map<string, string[]>();
+    for (const r of reviews) {
+      counts.set(r.project_id, (counts.get(r.project_id) || 0) + 1);
+      if (r.thumbnail_url) {
+        const list = previews.get(r.project_id) || [];
+        if (list.length < 3) list.push(r.thumbnail_url);
+        previews.set(r.project_id, list);
+      }
+    }
     return memberships
       .filter((m) => m.projects)
-      .map((m) => ({ ...m.projects, role: m.role, review_count: counts.get(m.project_id) || 0 }))
+      .map((m) => ({ ...m.projects, role: m.role, review_count: counts.get(m.project_id) || 0, preview_urls: previews.get(m.project_id) || [] }))
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   },
   async listReviews(projectId) {
@@ -206,5 +222,18 @@ export const supabaseDb: DbAdapter = {
     const { data, error } = await sb().storage.from(BUCKET).download(p);
     if (error || !data) return null;
     return await data.text();
+  },
+
+  async putThumbnail(reviewId, bytes, contentType) {
+    const path = `${reviewId}.jpg`;
+    const { error } = await sb().storage.from(THUMBS).upload(path, new Blob([bytes as BlobPart], { type: contentType }), { upsert: true, contentType, cacheControl: "300" });
+    if (error) throw new Error(error.message);
+    const { data } = sb().storage.from(THUMBS).getPublicUrl(path);
+    return `${data.publicUrl}?v=${Date.now()}`;
+  },
+  async getThumbnail(reviewId) {
+    const { data, error } = await sb().storage.from(THUMBS).download(`${reviewId}.jpg`);
+    if (error || !data) return null;
+    return { bytes: new Uint8Array(await data.arrayBuffer()), contentType: data.type || "image/jpeg" };
   },
 };

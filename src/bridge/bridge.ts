@@ -53,17 +53,20 @@
   };
 
   if (siteOrigin) {
+    // Every method: sites search, add to cart and talk GraphQL with POST as
+    // much as they GET; the proxy forwards method, body and headers.
     const nativeFetch = window.fetch;
     window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
       try {
         const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-        const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-        if (method === "GET" || method === "HEAD") {
-          const target = siteUrlFor(raw);
-          if (target) {
-            const req = input instanceof Request ? new Request(proxied(target), input) : proxied(target);
-            return nativeFetch.call(window, req, init);
-          }
+        const target = siteUrlFor(raw);
+        if (target) {
+          const req = input instanceof Request ? new Request(proxied(target), input) : proxied(target);
+          // the site's own cookies never travel anyway; drop credential modes that would trip CORS logic
+          const next: RequestInit = { ...(init || {}) };
+          if (next.credentials === "include") next.credentials = "same-origin";
+          if (next.mode === "no-cors") delete next.mode;
+          return nativeFetch.call(window, req, next);
         }
       } catch {
         /* fall through */
@@ -75,15 +78,25 @@
     XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
       let u: string | URL = url;
       try {
-        if (/^(GET|HEAD)$/i.test(method)) {
-          const target = siteUrlFor(String(url));
-          if (target) u = proxied(target);
-        }
+        const target = siteUrlFor(String(url));
+        if (target) u = proxied(target);
       } catch {
         /* ignore */
       }
       return (xhrOpen as unknown as (...a: unknown[]) => void).apply(this, [method, u, ...rest]);
     } as typeof XMLHttpRequest.prototype.open;
+
+    if (navigator.sendBeacon) {
+      const beacon = navigator.sendBeacon.bind(navigator);
+      navigator.sendBeacon = (url: string | URL, data?: BodyInit | null) => {
+        try {
+          const target = siteUrlFor(String(url));
+          return beacon(target ? proxied(target) : url, data);
+        } catch {
+          return beacon(url, data);
+        }
+      };
+    }
 
   }
 

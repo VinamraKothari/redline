@@ -139,12 +139,19 @@ export function Composer({
   async function submit() {
     const body = text.trim();
     if (!body && !attachments.length) return;
+    // Clear right away so the box feels instant; put everything back if the send fails.
+    const draft = { text, title, attachments };
     setBusy(true);
+    setText("");
+    setTitle("");
+    setAttachments([]);
     try {
-      await onSubmit(body, attachments, title.trim());
-      setText("");
-      setTitle("");
-      setAttachments([]);
+      await onSubmit(body, draft.attachments, draft.title.trim());
+    } catch (e) {
+      setText(draft.text);
+      setTitle(draft.title);
+      setAttachments(draft.attachments);
+      useStore.getState().toast((e as Error).message || "Couldn't send that — try again.", "error");
     } finally {
       setBusy(false);
     }

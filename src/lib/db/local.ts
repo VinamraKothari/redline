@@ -23,6 +23,7 @@ const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
 const SNAP_DIR = path.join(DIR, "snapshots");
+const THUMB_DIR = path.join(DIR, "thumbnails");
 
 let cache: Store | null = null;
 let writing: Promise<void> = Promise.resolve();
@@ -97,11 +98,17 @@ export const localDb: DbAdapter = {
     const s = await load();
     return Object.values(s.members)
       .filter((m) => m.user_id === userId && s.projects[m.project_id])
-      .map((m) => ({
-        ...s.projects[m.project_id],
-        role: m.role,
-        review_count: Object.values(s.reviews).filter((r) => r.project_id === m.project_id).length,
-      }))
+      .map((m) => {
+        const revs = Object.values(s.reviews)
+          .filter((r) => r.project_id === m.project_id)
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return {
+          ...s.projects[m.project_id],
+          role: m.role,
+          review_count: revs.length,
+          preview_urls: revs.map((r) => r.thumbnail_url).filter((u): u is string => Boolean(u)).slice(0, 3),
+        };
+      })
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   },
   async listReviews(projectId) {
@@ -269,6 +276,21 @@ export const localDb: DbAdapter = {
   async getSnapshot(p) {
     try {
       return await fs.readFile(path.join(SNAP_DIR, p.replace(/[^a-z0-9_.-]/gi, "_")), "utf8");
+    } catch {
+      return null;
+    }
+  },
+
+  async putThumbnail(reviewId, bytes) {
+    await fs.mkdir(THUMB_DIR, { recursive: true });
+    await fs.writeFile(path.join(THUMB_DIR, reviewId.replace(/[^a-z0-9_-]/gi, "_") + ".jpg"), bytes);
+    // served by /api/thumbnail/[id] (local development only)
+    return `/api/thumbnail/${reviewId}?v=${Date.now()}`;
+  },
+  async getThumbnail(reviewId) {
+    try {
+      const bytes = await fs.readFile(path.join(THUMB_DIR, reviewId.replace(/[^a-z0-9_-]/gi, "_") + ".jpg"));
+      return { bytes: new Uint8Array(bytes), contentType: "image/jpeg" };
     } catch {
       return null;
     }

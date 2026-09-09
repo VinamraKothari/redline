@@ -31,11 +31,15 @@
           s.onerror = function () { reject(new Error("chunk failed")); };
           document.head.appendChild(s);
         });
+        // a POST must reach the site too (the fixture server answers 501 to
+        // POST — that is fine, what matters is that it wasn't blocked by CORS)
+        var posted = await fetch("/api/data.json", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        window.__postStatus = posted.status;
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "/api/data.json");
         xhr.onload = function () {
-          var ok = window.__chunkLoaded && xhr.status === 200;
-          document.getElementById("status").textContent = ok ? "hydrated" : "xhr " + xhr.status;
+          var ok = window.__chunkLoaded && xhr.status === 200 && (window.__postStatus === 501 || window.__postStatus === 200);
+          document.getElementById("status").textContent = ok ? "hydrated" : "xhr " + xhr.status + " post " + window.__postStatus;
         };
         xhr.onerror = function () { document.getElementById("status").textContent = "xhr failed"; };
         xhr.send();

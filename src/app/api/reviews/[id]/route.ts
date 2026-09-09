@@ -26,8 +26,16 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/re
     patch.snapshot_path = null;
   }
   const d = await db();
+  // Move to another project: needs edit access there too.
+  if (typeof body.project_id === "string" && body.project_id !== review.project_id) {
+    const targetRole = await d.memberRole(body.project_id, user.id);
+    if (!targetRole || targetRole === "view") return Response.json({ error: "You need edit access to the project you're moving this page to." }, { status: 403 });
+    patch.project_id = body.project_id;
+    await d.updateProject(body.project_id, {});
+  }
   const updated = await d.updateReview(id, patch);
-  return Response.json({ review: publicReview(updated!, role, user.id) });
+  if (review.project_id) await d.updateProject(review.project_id, {});
+  return Response.json({ review: publicReview(updated!, patch.project_id ? (await d.memberRole(patch.project_id, user.id)) || role : role, user.id) });
 });
 
 /** Delete: project admins, or whoever created the review. */

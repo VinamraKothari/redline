@@ -25,5 +25,5 @@ export const POST = guarded(async (req: NextRequest) => {
   const project: Project = { id: newSlug(), name, created_by: user.id, created_at: now, updated_at: now };
   const d = await db();
   await d.createProject(project, user.id);
-  return Response.json({ project: { ...project, role: "admin", review_count: 0 } });
+  return Response.json({ project: { ...project, role: "admin", review_count: 0, preview_urls: [] } });
 });

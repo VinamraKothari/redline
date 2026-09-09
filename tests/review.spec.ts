@@ -102,6 +102,7 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   const viewerCtx = await browser.newContext();
   const vp = await viewerCtx.newPage();
   await signIn(vp, "Sam Viewer");
+  const vp2 = vp;
   await vp.goto(url);
   await expect(vp.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
   await expect(vp.locator("nav").getByLabel(/Comment/)).toHaveCount(0);
@@ -113,7 +114,6 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
     data: { body: "nope", viewport_width: 1440, anchor: { selector: null, fx: 0, fy: 0, px: 1, py: 1 } },
   });
   expect(denied.status()).toBe(403);
-  await viewerCtx.close();
 
   // a stranger gets a 404, not the page
   const strangerCtx = await browser.newContext();
@@ -129,10 +129,41 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   await page.getByRole("button", { name: /member/ }).click();
   await expect(page.getByText("Sam Viewer")).toBeVisible();
   await expect(page.getByLabel("Role of Sam Viewer")).toHaveValue("view");
+  await page.keyboard.press("Escape");
+
+  // page management: rename from the tile menu, move to another project
+  await page.getByRole("button", { name: "Options for Acme — Fixture page" }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  await page.getByLabel("Page name").fill("Homepage v2");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("link", { name: /Homepage v2/ }).first()).toBeVisible();
+  // a viewer may neither rename nor move pages
+  expect((await vp2.request.patch(`/api/reviews/${reviewId}`, { data: { title: "Nope" } })).status()).toBe(403);
+  await viewerCtx.close();
+  const otherName = `Other project ${Date.now().toString(36)}`;
+  const other = await createProject(page, otherName);
+  await page.getByRole("button", { name: "Options for Homepage v2" }).click();
+  await page.getByRole("menuitem", { name: /Move to project/ }).click();
+  await page.getByRole("dialog").getByRole("radio", { name: otherName }).click();
+  await page.getByRole("button", { name: "Move" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Homepage v2/ })).toHaveCount(0);
+  const moved = await (await page.request.get(`/api/projects/${other.id}`)).json();
+  expect(moved.reviews.map((r: { id: string }) => r.id)).toContain(reviewId);
+  // moving into a project you can't edit is refused
+  expect((await page.request.patch(`/api/reviews/${reviewId}`, { data: { project_id: "nope" } })).status()).toBe(403);
 });
 
-test("creates a review, proxies the page, neutralises frame busting", async ({ page }) => {
+test("creates a review, proxies the page, neutralises frame busting, captures a preview", async ({ page }) => {
   const frame = await createReview(page);
+  // a preview of the page is captured a few seconds after load and shown on the project page
+  const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
+  await expect
+    .poll(async () => ((await (await page.request.get(`/api/reviews/${id}`)).json()).review.thumbnail_url ? "yes" : "no"), { timeout: 20_000 })
+    .toBe("yes");
+  const thumb = await page.request.get((await (await page.request.get(`/api/reviews/${id}`)).json()).review.thumbnail_url);
+  expect(thumb.status()).toBe(200);
+  expect(thumb.headers()["content-type"]).toContain("image/jpeg");
   // We're still on our own origin (frame-buster did not escape)
   expect(page.url()).toMatch(/\/r\//);
   // Title picked up from the page
