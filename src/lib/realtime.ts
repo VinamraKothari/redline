@@ -4,6 +4,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import { api } from "./api";
 import { useStore } from "./store";
 import type { Comment, Shape, Viewer } from "./types";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./supabase-config";
 
 /**
  * Keeps the store in sync with other reviewers.
@@ -13,15 +14,15 @@ import type { Comment, Shape, Viewer } from "./types";
 
 let client: SupabaseClient | null = null;
 function supabase(): SupabaseClient | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = SUPABASE_URL;
+  const key = SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) return null;
   if (!client) client = createClient(url, key, { auth: { persistSession: false } });
   return client;
 }
 
 export function realtimeAvailable(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  return Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
 }
 
 export interface RealtimeHandle {

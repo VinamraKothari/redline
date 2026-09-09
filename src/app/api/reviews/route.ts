@@ -6,6 +6,15 @@ import { hostOf, newKey, newSlug, normalizeUrl } from "@/lib/util";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  try {
+    return await create(req);
+  } catch (e) {
+    console.error("[redline] create review failed", e);
+    return Response.json({ error: (e as Error).message || "Could not create the review." }, { status: 500 });
+  }
+}
+
+async function create(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     url?: string;
     name?: string;

@@ -95,7 +95,7 @@ export function Home() {
 
   return (
     <main
-      className="relative h-full overflow-auto"
+      className="relative h-full overflow-y-auto overflow-x-hidden"
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);

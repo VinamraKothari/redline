@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
+import { SUPABASE_URL } from "@/lib/supabase-config";
 import type { Comment, Review, Shape } from "@/lib/types";
 
 const BUCKET = "snapshots";
@@ -8,7 +9,7 @@ const BUCKET = "snapshots";
 let client: SupabaseClient | null = null;
 function sb(): SupabaseClient {
   if (client) return client;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const url = SUPABASE_URL;
   const key = supabaseSecret()!;
   client = createClient(url, key, { auth: { persistSession: false } });
   return client;
