@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { decodeBody, detectCharset, rewriteCss, rewriteHtml } from "@/lib/proxy/rewrite";
+import { PROXY_TARGET_HEADER, SITE_COOKIE } from "@/lib/proxy/site-cookie";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ function errorPage(status: number, title: string, detail: string, url: string): 
 }
 
 export async function GET(req: NextRequest) {
-  const target = req.nextUrl.searchParams.get("url");
+  const target = req.nextUrl.searchParams.get("url") || req.headers.get(PROXY_TARGET_HEADER);
   if (!target) return new Response("missing url", { status: 400 });
 
   let u: URL;
@@ -123,15 +124,16 @@ export async function GET(req: NextRequest) {
     const html = decodeBody(buf, charset);
     const stripScripts = req.nextUrl.searchParams.get("js") === "0";
     const out = rewriteHtml(html, { finalUrl, requestedUrl: u.toString(), appOrigin, stripScripts });
-    return new Response(out, {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        "x-redline-final-url": encodeURIComponent(finalUrl),
-        "content-security-policy": "frame-ancestors 'self'",
-      },
+    const resHeaders = new Headers({
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "x-redline-final-url": encodeURIComponent(finalUrl),
+      "content-security-policy": "frame-ancestors 'self'",
     });
+    // Remembered for same-origin asset routing when the Referer can't tell
+    // us the site (nested ES module imports) — see src/proxy.ts.
+    resHeaders.append("set-cookie", `${SITE_COOKIE}=${encodeURIComponent(new URL(finalUrl).origin)}; Path=/; SameSite=Lax; Max-Age=86400`);
+    return new Response(out, { status: 200, headers: resHeaders });
   }
 
   if (isCss) {

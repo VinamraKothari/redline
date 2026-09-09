@@ -134,7 +134,7 @@ test("full screen hides chrome; navigation inside the frame shows banner", async
   await expect(page.locator("header")).toBeVisible();
 
   // click a link inside the page → proxied navigation + banner
-  const link = await pointIn(page, 'a.btn[href="/pricing.html"]', 0.5, 0.5);
+  const link = await pointIn(page, 'a.btn[href$="/pricing.html"]', 0.5, 0.5);
   await page.mouse.click(link.x, link.y);
   await expect(page.getByText(/You.ve left the reviewed page/)).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
@@ -187,7 +187,19 @@ test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports
   expect(flags).toEqual({ mod: true, dep: true });
   // no fallback was triggered
   await expect(page.locator('iframe[title="Page under review"]')).not.toHaveAttribute("src", /js=0/);
-  // the initial <script src> was rewritten to the proxy
-  const src = await frame.locator("script[type=module]").getAttribute("src");
-  expect(src).toContain("/api/proxy?url=");
+  // bundler contract: the site's script keeps its literal root-relative src
+  // (Turbopack registers chunks by it) yet loads same-origin via src/proxy.ts
+  const bundler = await page.evaluate(() => {
+    const w = document.querySelector<HTMLIFrameElement>('iframe[title="Page under review"]')!.contentWindow as Window & {
+      __appSrcAttr?: string;
+      __appStarted?: boolean;
+    };
+    return { attr: w.__appSrcAttr, started: w.__appStarted, base: w.document.baseURI };
+  });
+  expect(bundler.attr).toBe("/app.js");
+  expect(bundler.started).toBe(true);
+  expect(bundler.base).toContain("/api/proxy?url=");
+  // images/links were made absolute to the site instead
+  const img = await frame.locator("img").first().getAttribute("src");
+  expect(img).toMatch(/^http:\/\/localhost:3999\//);
 });

@@ -23,10 +23,10 @@
   };
 
   // ── Same-origin routing ──────────────────────────────────────────────────
-  // The document runs on the Redline origin, so the site's own scripts see a
-  // foreign origin: relative API calls hit us, absolute ones hit CORS, and
-  // framework chunk loaders fall over. Route GET traffic aimed at the site
-  // (absolute, or relative to our origin) through the proxy instead.
+  // The document runs on the Redline origin (no <base>), so the site's own
+  // scripts resolve relative URLs against us and absolute site URLs would hit
+  // CORS. Route GET fetch()/XHR aimed at the site through the proxy. Scripts,
+  // images and other elements are handled by the proxy rewrite + src/proxy.ts.
   const appOrigin = location.origin;
   let siteOrigin = "";
   try {
@@ -85,41 +85,6 @@
       return (xhrOpen as unknown as (...a: unknown[]) => void).apply(this, [method, u, ...rest]);
     } as typeof XMLHttpRequest.prototype.open;
 
-    // Dynamically inserted <script src> / <link href> (webpack/vite chunk loaders).
-    const hookUrlProp = (proto: object, prop: string) => {
-      const desc = Object.getOwnPropertyDescriptor(proto, prop);
-      if (!desc?.set || !desc.get) return;
-      Object.defineProperty(proto, prop, {
-        configurable: true,
-        get() {
-          return desc.get!.call(this);
-        },
-        set(v: string) {
-          try {
-            const target = siteUrlFor(String(v));
-            if (target) v = proxied(target);
-          } catch {
-            /* ignore */
-          }
-          desc.set!.call(this, v);
-        },
-      });
-    };
-    hookUrlProp(HTMLScriptElement.prototype, "src");
-    hookUrlProp(HTMLLinkElement.prototype, "href");
-    const setAttr = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function (name: string, value: string) {
-      try {
-        const n = name.toLowerCase();
-        if ((n === "src" && this instanceof HTMLScriptElement) || (n === "href" && this instanceof HTMLLinkElement)) {
-          const target = siteUrlFor(String(value));
-          if (target) value = proxied(target);
-        }
-      } catch {
-        /* ignore */
-      }
-      return setAttr.call(this, name, value);
-    };
   }
 
   // ── Keep the page from escaping or hijacking the host origin ─────────────
@@ -192,10 +157,10 @@
   );
 
   // ── Crash detection ──────────────────────────────────────────────────────
-  // Client-side frameworks (Next.js App Router in particular) may throw after
-  // hydration because the location is our proxy URL, then replace the whole
-  // document with a "This page couldn't load" screen. The server-rendered
-  // markup was fine, so the host reloads the page with scripts stripped.
+  // If a client-side framework still throws after hydration and replaces the
+  // whole document with an error screen (Next.js: <html id="__next_error__">),
+  // the server-rendered markup was fine — the host reloads with scripts
+  // stripped so the reviewer at least gets the static render.
   let reported = false;
   const root0 = document.documentElement;
   const check = () => {

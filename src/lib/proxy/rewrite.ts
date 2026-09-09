@@ -44,6 +44,17 @@ export function rewriteCss(css: string, cssUrl: string, appOrigin: string): stri
   return out;
 }
 
+/** Path (+query) of `abs` when it lives on the reviewed site's origin, else null. */
+function sameOriginPath(abs: string, pageUrl: string): string | null {
+  try {
+    const a = new URL(abs);
+    const p = new URL(pageUrl);
+    return a.origin === p.origin ? a.pathname + a.search : null;
+  } catch {
+    return null;
+  }
+}
+
 const REL_THROUGH_PROXY = new Set(["stylesheet", "preload", "modulepreload", "icon", "shortcut icon", "apple-touch-icon", "manifest"]);
 
 export interface RewriteOptions {
@@ -87,23 +98,65 @@ export function rewriteHtml(html: string, opts: RewriteOptions): string {
     const v = ($(el).attr("http-equiv") || "").toLowerCase();
     if (v === "content-security-policy" || v === "x-frame-options") $(el).remove();
   });
+  // Our same-origin asset routing (src/proxy.ts) relies on the Referer.
+  $("meta[name='referrer']").remove();
+  $("[referrerpolicy]").removeAttr("referrerpolicy");
   $("base").remove();
-
-  // 2. <base> so relative URLs resolve against the original site.
   const head = $("head").length ? $("head") : $("html").prepend("<head></head>").find("head");
-  head.prepend(`<base href="${base.replace(/"/g, "&quot;")}">`);
 
-  // 3. Stylesheets / preloads / icons through the proxy.
+  // 2. No <base>: URLs are made absolute here instead, so that root-relative
+  //    script paths keep resolving on *this* origin (see step 5).
+  const absolutize = (selector: string, attr: string) => {
+    $(selector).each((_, el) => {
+      const v = $(el).attr(attr);
+      if (!v) return;
+      const abs = resolve(base, v);
+      if (abs && abs !== v) $(el).attr(attr, abs);
+    });
+  };
+  const absolutizeSrcset = (selector: string) => {
+    $(selector).each((_, el) => {
+      const v = $(el).attr("srcset");
+      if (!v) return;
+      $(el).attr(
+        "srcset",
+        v
+          .split(",")
+          .map((part) => {
+            const [u, ...rest] = part.trim().split(/\s+/);
+            const abs = u ? resolve(base, u) : null;
+            return [abs || u, ...rest].join(" ");
+          })
+          .join(", "),
+      );
+    });
+  };
+  absolutize("a[href], area[href]", "href");
+  absolutize("img[src], source[src], video[src], audio[src], track[src], iframe[src], embed[src], input[type='image'][src]", "src");
+  absolutize("video[poster]", "poster");
+  absolutize("object[data]", "data");
+  absolutize("form[action]", "action");
+  absolutize("use[href], image[href]", "href");
+  absolutizeSrcset("img[srcset], source[srcset]");
+
+  // 3. Stylesheets / preloads / icons through the proxy (CSS gets rewritten
+  //    so fonts and images referenced from it load under our origin too).
   $("link[href]").each((_, el) => {
     const rel = ($(el).attr("rel") || "").toLowerCase().trim();
     const as = ($(el).attr("as") || "").toLowerCase();
-    if (REL_THROUGH_PROXY.has(rel) || (rel === "preload" && (as === "font" || as === "style" || as === "script" || as === "fetch"))) {
-      const abs = resolve(base, $(el).attr("href")!);
-      if (abs) {
-        $(el).attr("href", proxyUrl(abs, origin));
-        $(el).removeAttr("integrity");
-        $(el).removeAttr("crossorigin");
-      }
+    const abs = resolve(base, $(el).attr("href")!);
+    if (!abs) return;
+    if (REL_THROUGH_PROXY.has(rel) || (rel === "preload" && (as === "font" || as === "style" || as === "fetch"))) {
+      $(el).attr("href", proxyUrl(abs, origin));
+      $(el).removeAttr("integrity");
+      $(el).removeAttr("crossorigin");
+    } else if (rel === "preload" || rel === "modulepreload") {
+      // script preloads: keep them same-origin like the scripts themselves
+      $(el).attr("href", sameOriginPath(abs, base) ?? abs);
+      $(el).removeAttr("integrity");
+      $(el).removeAttr("crossorigin");
+    } else {
+      $(el).attr("href", abs);
     }
   });
 
@@ -117,19 +170,19 @@ export function rewriteHtml(html: string, opts: RewriteOptions): string {
     if (s.includes("url(")) $(el).attr("style", rewriteCss(s, base, origin));
   });
 
-  // 5. Scripts through the proxy too. Client frameworks (Next.js, Nuxt, Vite…)
-  //    load chunks and call APIs relative to the page; running them from a
-  //    foreign origin breaks chunk loading and CORS and crashes hydration. The
-  //    bridge routes runtime fetch()/XHR/dynamic <script> the same way.
-  //    Images/media stay on the original origin (no CORS needed, cacheable).
+  // 5. Scripts: the site's own scripts keep a ROOT-RELATIVE src, which now
+  //    resolves on this origin and is routed to the proxy by src/proxy.ts.
+  //    That keeps them same-origin (readable errors, no CORS) while leaving
+  //    the `src` attribute exactly as bundlers expect — Turbopack identifies
+  //    each chunk by the literal "/_next/…" attribute and silently never
+  //    starts the app if it's changed. Third-party scripts stay where they are.
   if (!opts.stripScripts) {
     $("script[src]").each((_, el) => {
       const abs = resolve(base, $(el).attr("src")!);
-      if (abs && /^https?:/i.test(abs)) {
-        $(el).attr("src", proxyUrl(abs, origin));
-        $(el).removeAttr("integrity");
-        $(el).removeAttr("crossorigin");
-      }
+      if (!abs || !/^https?:/i.test(abs)) return;
+      $(el).attr("src", sameOriginPath(abs, base) ?? abs);
+      $(el).removeAttr("integrity");
+      $(el).removeAttr("crossorigin");
     });
   }
   $("script[integrity], link[integrity]").removeAttr("integrity");
