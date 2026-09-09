@@ -188,10 +188,21 @@ export function rewriteHtml(html: string, opts: RewriteOptions): string {
   $("script[integrity], link[integrity]").removeAttr("integrity");
   $("img[crossorigin], script[crossorigin], video[crossorigin], audio[crossorigin]").removeAttr("crossorigin");
 
-  // 6. Neutralise frame busting via target.
+  // 6. Consent managers in "auto-blocking" mode hold back scripts they don't
+  //    recognise until consent is given — on a domain they have never scanned
+  //    (ours) that includes the page's own inline framework payloads, so
+  //    Next.js/React can't hydrate ("missing bootstrap script"). Keep the
+  //    banner, drop the blocking.
+  $("script[data-blockingmode]").attr("data-blockingmode", "manual");
+  $("script[src]").each((_, el) => {
+    const src = ($(el).attr("src") || "").toLowerCase();
+    if (/otautoblock|\/privacy-proxy\b|smart-data-protector|autoblock(ing)?\.js/.test(src)) $(el).remove();
+  });
+
+  // 7. Neutralise frame busting via target.
   $("a[target='_top'], a[target='_parent'], form[target='_top'], form[target='_parent']").removeAttr("target");
 
-  // 7. Inject the bridge first thing in <head>.
+  // 8. Inject the bridge first thing in <head>.
   head.prepend(
     `<script src="${origin}/bridge.js" data-redline-url="${opts.requestedUrl.replace(/"/g, "&quot;")}" data-redline-final="${base.replace(/"/g, "&quot;")}"></script>`,
   );
