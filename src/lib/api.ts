@@ -53,6 +53,20 @@ async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
+/** POST a JSON body, gzip-compressed in the browser when it is big (page snapshots). */
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const json = JSON.stringify(body);
+  if (typeof CompressionStream !== "undefined" && json.length > 200_000) {
+    try {
+      const gz = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+      return await call<T>(url, { method: "POST", headers: { "content-type": "application/octet-stream", "x-redline-gzip": "1" }, body: gz });
+    } catch {
+      /* fall through to plain JSON */
+    }
+  }
+  return call<T>(url, { method: "POST", body: json });
+}
+
 export const api = {
   /* identity */
   me() {
@@ -94,8 +108,8 @@ export const api = {
   },
 
   /* reviews */
-  createReview(body: { project_id: string; url?: string; viewport?: number; mode?: "live" | "upload"; html?: string; title?: string }) {
-    return call<{ review: PublicReview }>("/api/reviews", { method: "POST", body: JSON.stringify(body) });
+  createReview(body: { project_id: string; url?: string; viewport?: number; mode?: "live" | "upload" | "frozen"; html?: string; title?: string }) {
+    return postJson<{ review: PublicReview }>("/api/reviews", body);
   },
   loadReview(id: string) {
     return call<{ review: PublicReview; comments: Comment[]; shapes: Shape[] }>(`/api/reviews/${id}`, { cache: "no-store" });
@@ -159,21 +173,7 @@ export const api = {
     return call<{ ok: true }>(`/api/reviews/${reviewId}/shapes${q}`, { method: "DELETE" });
   },
 
-  async freeze(reviewId: string, html: string) {
-    // big pages: gzip in the browser so the upload stays well under the platform's body limit
-    const json = JSON.stringify({ html });
-    if (typeof CompressionStream !== "undefined" && json.length > 200_000) {
-      try {
-        const body = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
-        return await call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream", "x-redline-gzip": "1" },
-          body,
-        });
-      } catch {
-        /* fall through to plain JSON */
-      }
-    }
-    return call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { method: "POST", body: json });
+  freeze(reviewId: string, html: string) {
+    return postJson<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { html });
   },
 };

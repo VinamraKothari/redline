@@ -186,9 +186,10 @@ export function ProjectHome({ id }: { id: string }) {
                 </button>
               )}
             </div>
-            <p className="mt-1.5 text-[12.5px] text-ink-3">
-              You are {role === "admin" ? "an admin" : role === "edit" ? "an editor" : "a viewer"} · {ROLE_LABEL[role]} · every member sees all pages in
-              this project
+            <p className="mt-1.5 min-h-[18px] text-[12.5px] text-ink-3">
+              {data
+                ? `You are ${role === "admin" ? "an admin" : role === "edit" ? "an editor" : "a viewer"} · ${ROLE_LABEL[role]} · every member sees all pages in this project`
+                : ""}
             </p>
 
             {canEdit && (

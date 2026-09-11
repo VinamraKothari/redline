@@ -102,22 +102,41 @@ export async function renderFull(input: RenderInput): Promise<FullRender> {
     const page = await browser.newPage();
     page.on("dialog", (d) => d.dismiss().catch(() => {}));
     await page.setContent(unproxyHtml(input.html, input.baseUrl), { waitUntil: "load", timeout: NAV_TIMEOUT }).catch(() => {});
-    // images and fonts: give them a moment, but never wait forever
-    await page
-      .evaluate(
-        () =>
-          Promise.race([
-            Promise.all([
-              document.fonts?.ready ?? Promise.resolve(),
-              ...Array.from(document.images)
-                .filter((i) => !i.complete)
-                .map((i) => new Promise<void>((r) => ((i.onload = () => r()), (i.onerror = () => r())))),
+    const waitForAssets = () =>
+      page
+        .evaluate(
+          () =>
+            Promise.race([
+              Promise.all([
+                document.fonts?.ready ?? Promise.resolve(),
+                ...Array.from(document.images)
+                  .filter((i) => !i.complete)
+                  .map((i) => new Promise<void>((r) => ((i.onload = () => r()), (i.onerror = () => r())))),
+              ]),
+              new Promise((r) => setTimeout(r, 8000)),
             ]),
-            new Promise((r) => setTimeout(r, 8000)),
-          ]),
-      )
+        )
+        .catch(() => {});
+    const settle = (ms: number) => page.evaluate((t) => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, t))), ms);
+
+    // snapshots taken before revealHidden() existed, and any reveal-on-scroll
+    // element left in its hidden state: show it (there is no script to do so)
+    await page
+      .evaluate(() => {
+        document.querySelectorAll<HTMLElement>('[style*="opacity"]').forEach((el) => {
+          const st = el.style;
+          if (parseFloat(st.opacity) === 0 && /translate|scale|matrix/.test(st.transform || "")) {
+            st.opacity = "1";
+            st.transform = "none";
+          }
+        });
+        document.querySelectorAll("[data-aos]").forEach((el) => el.classList.add("aos-animate"));
+        // lazy images: everything is "in view" for a full-page render
+        document.querySelectorAll("img[loading='lazy']").forEach((i) => i.setAttribute("loading", "eager"));
+      })
       .catch(() => {});
-    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 300))));
+    await waitForAssets();
+    await settle(300);
     const height = Math.min(
       MAX_HEIGHT,
       Math.max(400, await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0))),
@@ -126,7 +145,9 @@ export async function renderFull(input: RenderInput): Promise<FullRender> {
     let base: Buffer;
     if (height <= FULLPAGE_LIMIT) {
       await page.setViewport({ width, height, deviceScaleFactor: 1 });
-      await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 200))));
+      // the taller viewport brings every lazy image into view — let them arrive
+      await waitForAssets();
+      await settle(300);
       const shot = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height }, captureBeyondViewport: true });
       base = Buffer.from(shot as Uint8Array);
     } else {
@@ -137,7 +158,8 @@ export async function renderFull(input: RenderInput): Promise<FullRender> {
       for (let y = 0; y < height; y += slice) {
         const h = Math.min(slice, height - y);
         await page.evaluate((yy) => window.scrollTo(0, yy), y);
-        await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 120))));
+        await waitForAssets();
+        await settle(150);
         const shot = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height: h } });
         parts.push({ input: Buffer.from(shot as Uint8Array), top: y, left: 0 });
       }

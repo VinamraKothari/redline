@@ -49,6 +49,7 @@ export function Toasts() {
               ["Lock hover state (menus, tooltips)", "H"],
               ["Full-screen preview", "F"],
               ["Freeze / unfreeze the page", "⇧ F"],
+              ["Save this state as a new page", "⇧ P"],
               ["Share & export", "⇧ S"],
               ["Reload the page", "R"],
               ["Site scripts on / off", "⇧ J"],

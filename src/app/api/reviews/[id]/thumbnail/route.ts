@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { guarded, reviewAccess } from "@/lib/auth/server";
 import { publicReview } from "@/lib/review";
 import { screenshotPage, screenshotsAvailable } from "@/lib/screenshot";
+import { unproxyHtml } from "@/lib/render";
 import { STALE_MS } from "@/lib/thumbnail-policy";
 
 export const runtime = "nodejs";
@@ -25,9 +26,11 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/rev
   if (!screenshotsAvailable()) return Response.json({ error: "Previews are not available on this server." }, { status: 501 });
 
   const d = await db();
-  // uploaded files render from the stored HTML; everything else opens the live URL
+  // uploads and frozen states render from the stored HTML; live pages open the URL
   const upload = review.url.startsWith("upload://");
-  const html = upload && review.snapshot_path ? ((await d.getSnapshot(review.snapshot_path)) ?? undefined) : undefined;
+  const fromSnapshot = (upload || review.mode === "frozen") && !!review.snapshot_path;
+  let html = fromSnapshot ? ((await d.getSnapshot(review.snapshot_path!)) ?? undefined) : undefined;
+  if (html && review.mode === "frozen") html = unproxyHtml(html, review.url);
   const url = upload ? undefined : review.url;
   if (html == null && !url) return Response.json({ error: "Nothing to capture." }, { status: 400 });
 

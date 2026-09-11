@@ -391,6 +391,31 @@ test("lock hover (H): CSS and JS hover menus stay open while the pointer is else
   await expect(frame.locator("#js-panel")).toBeHidden();
 });
 
+test("save state as a new page: a locked hover menu stays open for everyone on the new frozen page", async ({ page }) => {
+  const frame = await createReview(page, FIXTURE.replace(/site\.html$/, "hover.html"));
+  await page.keyboard.press("v");
+  const t = await pointIn(page, "#css-trigger", 0.5, 0.5);
+  await page.mouse.move(t.x, t.y);
+  await expect(frame.locator("#css-panel")).toBeVisible();
+  await page.keyboard.press("h");
+  await page.mouse.move(20, 20);
+  await page.keyboard.press("Shift+P");
+  await expect(page.getByText("Save this state as a new page")).toBeVisible();
+  await page.getByLabel("State page name").fill("Hover fixture — menu open");
+  await page.getByRole("button", { name: /Save as new page/ }).click();
+  await page.waitForURL(/\/r\/[a-z0-9]+/);
+  const frozen = page.frameLocator('iframe[title="Page under review"]');
+  await expect(frozen.locator("#css-panel")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Frozen", { exact: true })).toBeVisible();
+  const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
+  const r = (await (await page.request.get(`/api/reviews/${id}`)).json()).review;
+  expect(r.mode).toBe("frozen");
+  expect(r.title).toBe("Hover fixture — menu open");
+  // the page switcher lists both pages of the project
+  await page.getByRole("button", { name: "Pages in this project" }).click();
+  await expect(page.locator('[role="menuitem"][href^="/r/"]')).toHaveCount(2);
+});
+
 test("exports: PNG sections and a Jira CSV with a rendered screenshot per comment", async ({ page }) => {
   await createReview(page);
   const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];

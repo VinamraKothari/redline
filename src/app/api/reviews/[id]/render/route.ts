@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { gunzipSync } from "node:zlib";
+import { readJson } from "@/lib/body";
 import { db } from "@/lib/db";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
 import { screenshotsAvailable } from "@/lib/screenshot";
@@ -31,15 +31,8 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/rev
   const { review } = await reviewAccess(id, "view");
   if (!screenshotsAvailable()) throw new HttpError(501, "Rendering is not available on this server.");
 
-  const raw = Buffer.from(await req.arrayBuffer());
-  if (raw.byteLength > MAX_BODY) throw new HttpError(413, "The page snapshot is too large to render.");
-  let body: Body;
-  try {
-    const text = req.headers.get("x-redline-gzip") === "1" ? gunzipSync(raw).toString("utf8") : raw.toString("utf8");
-    body = JSON.parse(text) as Body;
-  } catch {
-    throw new HttpError(400, "Bad render payload.");
-  }
+  const body = await readJson<Body>(req, MAX_BODY);
+  if (!body) throw new HttpError(400, "Bad render payload (or the page snapshot is too large).");
   if (!body || typeof body.html !== "string" || !body.html || !(body.kind === "png" || body.kind === "jira")) throw new HttpError(400, "Bad render payload.");
   const width = Number(body.width) || review.default_viewport;
   const pins = (Array.isArray(body.pins) ? body.pins : [])

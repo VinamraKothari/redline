@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { readJson } from "@/lib/body";
 import { guarded, reviewAccess } from "@/lib/auth/server";
 import { publicReview } from "@/lib/review";
 
@@ -9,15 +10,7 @@ export const runtime = "nodejs";
 export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/freeze">) => {
   const { id } = await ctx.params;
   const { user, role } = await reviewAccess(id, "edit");
-  let html: string | undefined;
-  try {
-    if (req.headers.get("x-redline-gzip") === "1") {
-      const { gunzipSync } = await import("node:zlib");
-      html = (JSON.parse(gunzipSync(Buffer.from(await req.arrayBuffer())).toString("utf8")) as { html?: string }).html;
-    } else html = ((await req.json()) as { html?: string }).html;
-  } catch {
-    html = undefined;
-  }
+  const html = (await readJson<{ html?: string }>(req))?.html;
   if (!html || html.length < 100) return Response.json({ error: "Nothing to freeze." }, { status: 400 });
   if (html.length > 12 * 1024 * 1024) return Response.json({ error: "The page is too large to freeze (12 MB limit)." }, { status: 413 });
   const d = await db();

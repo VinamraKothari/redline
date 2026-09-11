@@ -9,14 +9,20 @@ import { signOut } from "@/lib/auth/client";
 import { setMe, useStore } from "@/lib/store";
 
 /** Loads the signed-in profile into the store once per page. */
+let mePending: Promise<void> | null = null;
+
+/** The signed-in profile, fetched once per page load however many components ask. */
 export function useMe() {
   const me = useStore((s) => s.me);
   useEffect(() => {
     if (me) return;
-    api
+    mePending ??= api
       .me()
       .then(({ user }) => setMe(user))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        mePending = null;
+      });
   }, [me]);
   return me;
 }

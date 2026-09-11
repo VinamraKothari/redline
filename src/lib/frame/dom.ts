@@ -511,6 +511,26 @@ export function summarize(doc: Document, limit = 4000): DesignSummary {
 
 /* ─── Serialise the rendered document (Freeze) ──────────────────────────── */
 
+/**
+ * Scroll-reveal animations (Framer Motion whileInView, AOS, …) leave content
+ * that is out of view at `opacity: 0; transform: translateY(…)`. A snapshot
+ * has no scripts to animate it in, so those sections would stay invisible
+ * forever — reveal them.
+ */
+export function revealHidden(root: Element): void {
+  root.querySelectorAll<HTMLElement>('[style*="opacity"]').forEach((el) => {
+    const st = el.style;
+    if (parseFloat(st.opacity) === 0 && /translate|scale|matrix/.test(st.transform || "")) {
+      st.opacity = "1";
+      st.transform = "none";
+    }
+  });
+  root.querySelectorAll("[data-aos]").forEach((el) => el.classList.add("aos-animate"));
+  root.querySelectorAll<HTMLElement>(".reveal:not(.active), .fade-in:not(.visible), .wow:not(.animated)").forEach((el) => {
+    el.classList.add("active", "visible", "animated");
+  });
+}
+
 export function serializeDocument(doc: Document): string {
   const clone = doc.documentElement.cloneNode(true) as HTMLElement;
   // Inline the live stylesheets so the snapshot survives origin CSS changes.
@@ -542,6 +562,7 @@ export function serializeDocument(doc: Document): string {
       else c.setAttribute("value", live.value);
     } else if (live instanceof HTMLTextAreaElement) c.textContent = live.value;
   });
+  revealHidden(clone);
   const style = doc.createElement("style");
   style.setAttribute("data-redline-frozen-styles", "1");
   style.textContent = styles.join("\n");

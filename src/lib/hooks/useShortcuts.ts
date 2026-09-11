@@ -92,6 +92,10 @@ export function useShortcuts() {
         window.dispatchEvent(new CustomEvent("redline:freeze"));
         return;
       }
+      if (e.shiftKey && k === "p") {
+        window.dispatchEvent(new CustomEvent("redline:capture-state"));
+        return;
+      }
       if (e.shiftKey && k === "j") {
         window.dispatchEvent(new CustomEvent("redline:scripts"));
         return;
