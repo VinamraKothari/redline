@@ -158,6 +158,38 @@ export async function renderFull(input: RenderInput): Promise<FullRender> {
       .catch(() => {});
     await waitForAssets();
     await settle(300);
+    // Fixed elements (sticky headers, open drawers, chat bubbles) would grow
+    // with the tall capture viewport — a 100vh drawer becomes a 16000px white
+    // column. Pin them where they are at the reviewer's viewport height.
+    await page
+      .evaluate(() => {
+        const list: { el: HTMLElement; r: DOMRect }[] = [];
+        document.querySelectorAll<HTMLElement>("body *").forEach((el) => {
+          if (getComputedStyle(el).position !== "fixed") return;
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) return;
+          list.push({ el, r });
+        });
+        // outermost fixed elements only — a fixed child keeps following its parent
+        const outer = list.filter(({ el }) => !list.some((o) => o.el !== el && o.el.contains(el)));
+        for (const { el, r } of outer) {
+          el.style.setProperty("position", "absolute", "important");
+          el.style.setProperty("top", `${r.top}px`, "important");
+          el.style.setProperty("left", `${r.left}px`, "important");
+          el.style.setProperty("width", `${r.width}px`, "important");
+          el.style.setProperty("height", `${r.height}px`, "important");
+          el.style.setProperty("right", "auto", "important");
+          el.style.setProperty("bottom", "auto", "important");
+          el.style.setProperty("max-height", "none", "important");
+          el.style.setProperty("margin", "0", "important");
+          // absolute is relative to the nearest positioned ancestor: correct for it
+          const now = el.getBoundingClientRect();
+          el.style.setProperty("top", `${r.top - (now.top - r.top)}px`, "important");
+          el.style.setProperty("left", `${r.left - (now.left - r.left)}px`, "important");
+        }
+      })
+      .catch(() => {});
+    await settle(100);
     const height = Math.min(
       MAX_HEIGHT,
       Math.max(400, await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0))),

@@ -157,6 +157,23 @@ export function useShortcuts() {
         case "s":
           if (st.mode === "draw") st.set({ tool: "select" });
           break;
+        case "u": {
+          // read / unread on the open thread; ⇧U marks every thread read
+          if (e.shiftKey) {
+            st.markAllRead();
+            st.toast("All threads marked as read.", "success");
+            break;
+          }
+          if (!st.activeThread) break;
+          if (st.readAt[st.activeThread]?.startsWith("!")) {
+            st.markRead(st.activeThread);
+            st.toast("Marked as read.", "success");
+          } else {
+            st.markUnread(st.activeThread);
+            st.toast("Marked as unread — it stays flagged until you open it again.", "success");
+          }
+          break;
+        }
         case "delete":
         case "backspace":
           if (st.mode === "draw" && st.selectedShape) window.dispatchEvent(new CustomEvent("redline:delete-shape"));

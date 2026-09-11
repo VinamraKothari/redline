@@ -23,8 +23,8 @@ export function Toasts() {
           <div
             key={t.id}
             className={cn(
-              "pointer-events-auto flex items-center gap-3 rounded-lg px-3 py-2 text-[12.5px] shadow-pop fade-up",
-              t.kind === "error" ? "bg-red text-white" : "bg-ink text-white",
+              "pointer-events-auto flex items-center gap-3 rounded-lg px-3 py-2 text-[12.5px] shadow-pop toast-in",
+              t.kind === "error" ? "bg-red text-white" : "glass-dark text-white",
             )}
           >
             {t.kind === "success" && <span className="h-1.5 w-1.5 rounded-full bg-green" />}
@@ -56,6 +56,8 @@ export function Toasts() {
               ["Viewport: desktop / tablet / phone", "1 / 2 / 3"],
               ["Hide / show comments", "⇧ C"],
               ["Next / previous comment", "N / ⇧ N"],
+              ["Mark thread unread / read", "U"],
+              ["Mark all threads read", "⇧ U"],
               ["Close / go back", "Esc"],
               ["Deep-select innermost element", "hold Ctrl / ⌘"],
               ["Measure to another element", "select, then hold Alt"],

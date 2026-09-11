@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
 import { startRealtime, type RealtimeHandle } from "@/lib/realtime";
-import { loadReadState, useStore } from "@/lib/store";
+import { loadReadState, mergeReads, useStore } from "@/lib/store";
 import { TooltipProvider } from "@/components/ui/primitives";
 import { TopBar } from "./TopBar";
 import { LeftRail } from "./LeftRail";
@@ -58,6 +58,8 @@ export function Workspace({
       try {
         const data = await api.loadReview(initial.id);
         set({ review: data.review, comments: data.comments, shapes: data.shapes });
+        // read state from other devices (best effort)
+        api.getReads(initial.id).then(({ reads }) => mergeReads(reads)).catch(() => {});
       } catch (e) {
         useStore.getState().toast((e as Error).message, "error");
       }

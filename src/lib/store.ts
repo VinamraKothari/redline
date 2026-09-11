@@ -7,7 +7,7 @@ import type { ElementInfo, Rect } from "./frame/dom";
 
 export type Mode = "browse" | "comment" | "draw" | "inspect";
 export type Panel = "comments" | "inspect" | null;
-export type CommentFilter = "all" | "mine" | "mentions";
+export type CommentFilter = "all" | "unread" | "mine" | "mentions";
 export type CommentSort = "newest" | "oldest" | "unread";
 
 export interface HoverInfo {
@@ -69,7 +69,7 @@ interface State {
   commentSort: CommentSort;
   activeThread: string | null;
   draft: DraftPin | null;
-  readAt: Record<string, string>; // thread id -> iso last read
+  readAt: Record<string, string>; // thread id -> iso last read, or "!" + iso when marked unread
 
   // inspect
   hover: HoverInfo | null;
@@ -95,6 +95,9 @@ interface State {
   upsertShape: (s: Shape) => void;
   removeShape: (id: string) => void;
   markRead: (threadId: string) => void;
+  /** flag a thread to come back to — it shows as unread until opened again */
+  markUnread: (threadId: string) => void;
+  markAllRead: () => void;
 }
 
 const READ_KEY = "redline:read:";
@@ -185,16 +188,71 @@ export const useStore = create<State>((set, get) => ({
   markRead: (threadId) => {
     const now = new Date().toISOString();
     set((s) => ({ readAt: { ...s.readAt, [threadId]: now } }));
-    const rid = get().review?.id;
-    if (rid) {
-      try {
-        localStorage.setItem(READ_KEY + rid, JSON.stringify(get().readAt));
-      } catch {
-        /* ignore */
-      }
-    }
+    saveReads(get);
+  },
+  markUnread: (threadId) => {
+    set((s) => ({ readAt: { ...s.readAt, [threadId]: "!" + new Date().toISOString() } }));
+    saveReads(get);
+  },
+  markAllRead: () => {
+    const now = new Date().toISOString();
+    set((s) => {
+      const readAt = { ...s.readAt };
+      for (const c of s.comments) if (c.parent_id === null) readAt[c.id] = now;
+      return { readAt };
+    });
+    saveReads(get);
   },
 }));
+
+/** Read marks are ISO times; an unread mark is "!" + the time it was set. The later mark wins. */
+export function laterRead(a: string, b: string | undefined): boolean {
+  if (b === undefined) return true;
+  return a.replace(/^!/, "") > b.replace(/^!/, "");
+}
+
+/** Whether a thread counts as unread for this viewer. */
+export function isUnread(readAt: Record<string, string>, rootId: string, lastActivity: string, othersInvolved: boolean): boolean {
+  const r = readAt[rootId];
+  if (r?.startsWith("!")) return true; // deliberately marked unread
+  return othersInvolved && (!r || r < lastActivity);
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** Keep the browser copy immediately and the account copy shortly after. */
+function saveReads(get: () => State) {
+  const rid = get().review?.id;
+  if (!rid) return;
+  try {
+    localStorage.setItem(READ_KEY + rid, JSON.stringify(get().readAt));
+  } catch {
+    /* ignore */
+  }
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const st = get();
+    if (!st.review || st.review.id !== rid) return;
+    void import("./api").then(({ api }) => api.putReads(rid, st.readAt)).catch(() => {});
+  }, 1200);
+}
+
+/** Merge the account's read state (from another device) into this tab's. */
+export function mergeReads(remote: Record<string, string>) {
+  useStore.setState((s) => {
+    const readAt = { ...s.readAt };
+    for (const [k, v] of Object.entries(remote)) if (laterRead(v, readAt[k])) readAt[k] = v;
+    return { readAt };
+  });
+  const rid = useStore.getState().review?.id;
+  if (rid) {
+    try {
+      localStorage.setItem(READ_KEY + rid, JSON.stringify(useStore.getState().readAt));
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 /** Adopt the signed-in profile as this tab's identity. */
 export function setMe(p: Profile) {

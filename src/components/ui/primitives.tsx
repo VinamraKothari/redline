@@ -29,7 +29,7 @@ export function Tip({
         <TooltipPrimitive.Content
           side={side}
           sideOffset={8}
-          className="z-[200] flex items-center gap-2 rounded-md bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white shadow-pop fade-up select-none"
+          className="z-[200] flex items-center gap-2 rounded-md bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white shadow-pop pop select-none"
         >
           {label}
           {kbd && <span className="kbd !bg-white/10 !border-white/10 !text-white/80">{kbd}</span>}
@@ -50,7 +50,7 @@ export const IconButton = React.forwardRef<
       ref={ref}
       type="button"
       className={cn(
-        "inline-flex items-center justify-center rounded-md transition-colors duration-100 disabled:opacity-40 disabled:pointer-events-none",
+        "press inline-flex items-center justify-center rounded-md disabled:opacity-40 disabled:pointer-events-none",
         dims,
         active ? "bg-ink text-white hover:bg-ink" : danger ? "text-red hover:bg-red-soft" : "text-ink-2 hover:bg-hover hover:text-ink",
         className,
@@ -76,7 +76,7 @@ export const Button = React.forwardRef<
       ref={ref}
       type="button"
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors disabled:opacity-40 disabled:pointer-events-none",
+        "press inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none",
         v,
         s,
         className,
@@ -103,7 +103,7 @@ export function PopoverContent({
         align={align}
         sideOffset={6}
         collisionPadding={12}
-        className={cn("z-[150] rounded-lg bg-panel shadow-pop hairline fade-up outline-none", className)}
+        className={cn("z-[150] rounded-lg bg-panel shadow-pop hairline pop outline-none", className)}
         {...props}
       />
     </PopoverPrimitive.Portal>
@@ -128,11 +128,11 @@ export function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-[180] bg-ink/25 backdrop-blur-[2px] data-[state=open]:animate-in" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-[180] bg-ink/25 backdrop-blur-[2px] overlay-in" />
       <DialogPrimitive.Content
         style={{ width, maxWidth: "calc(100vw - 32px)" }}
         className={cn(
-          "fixed left-1/2 top-1/2 z-[190] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-panel p-5 shadow-pop hairline fade-up outline-none",
+          "fixed left-1/2 top-1/2 z-[190] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-panel p-5 shadow-pop hairline dialog-in outline-none",
           className,
         )}
       >
@@ -165,7 +165,7 @@ export function MenuContent({ className, ...props }: DropdownPrimitive.DropdownM
       <DropdownPrimitive.Content
         sideOffset={6}
         collisionPadding={8}
-        className={cn("z-[160] min-w-[180px] rounded-lg bg-panel p-1 shadow-pop hairline fade-up outline-none", className)}
+        className={cn("z-[160] min-w-[180px] rounded-lg bg-panel p-1 shadow-pop hairline pop outline-none", className)}
         {...props}
       />
     </DropdownPrimitive.Portal>

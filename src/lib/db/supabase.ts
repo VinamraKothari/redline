@@ -224,6 +224,17 @@ export const supabaseDb: DbAdapter = {
     return await data.text();
   },
 
+  /* read state — table from migration 004; missing table degrades to local-only */
+  async getReads(userId, reviewId) {
+    const { data, error } = await sb().from("review_reads").select("reads").eq("user_id", userId).eq("review_id", reviewId).maybeSingle<{ reads: Record<string, string> }>();
+    if (error) return {};
+    return data?.reads ?? {};
+  },
+  async putReads(userId, reviewId, reads) {
+    const { error } = await sb().from("review_reads").upsert({ user_id: userId, review_id: reviewId, reads, updated_at: new Date().toISOString() });
+    if (error && !/review_reads/.test(error.message)) throw new Error(error.message);
+  },
+
   async putThumbnail(reviewId, bytes, contentType) {
     const path = `${reviewId}.jpg`;
     const { error } = await sb().storage.from(THUMBS).upload(path, new Blob([bytes as BlobPart], { type: contentType }), { upsert: true, contentType, cacheControl: "300" });

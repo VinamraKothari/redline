@@ -173,6 +173,12 @@ export const api = {
     return call<{ ok: true }>(`/api/reviews/${reviewId}/shapes${q}`, { method: "DELETE" });
   },
 
+  getReads(reviewId: string) {
+    return call<{ reads: Record<string, string> }>(`/api/reviews/${reviewId}/reads`, { cache: "no-store" });
+  },
+  putReads(reviewId: string, reads: Record<string, string>) {
+    return call<{ reads: Record<string, string> }>(`/api/reviews/${reviewId}/reads`, { method: "PUT", body: JSON.stringify({ reads }) });
+  },
   freeze(reviewId: string, html: string) {
     return postJson<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { html });
   },

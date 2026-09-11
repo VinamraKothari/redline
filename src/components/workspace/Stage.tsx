@@ -279,7 +279,7 @@ export function Stage() {
       {(navigatedAway || frameError || hoverLocked) && (
         <div className="fixed left-1/2 top-16 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
           {hoverLocked && (
-            <div className="flex items-center gap-2 rounded-full bg-ink px-3 py-1.5 text-[12.5px] text-white shadow-pop fade-up">
+            <div className="flex items-center gap-2 rounded-full glass-dark px-3 py-1.5 text-[12.5px] text-white shadow-pop toast-in">
               <MousePointerClick size={13} className="text-red" />
               Hover state locked — menus and tooltips stay open. Comment or inspect them, then press <span className="kbd !py-0.5">H</span> to release.
               <button type="button" onClick={() => frame().lockHover(false)} className="rounded-full bg-white/15 px-2 py-0.5 text-[11.5px] hover:bg-white/25">
@@ -288,7 +288,7 @@ export function Stage() {
             </div>
           )}
           {navigatedAway && (
-            <div className="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-[12.5px] text-white shadow-pop fade-up">
+            <div className="flex items-center gap-2 rounded-lg glass-dark px-3 py-2 text-[12.5px] text-white shadow-pop toast-in">
               <span className="max-w-[320px] truncate">
                 You&apos;ve left the reviewed page — now on <span className="mono">{hostOf(navigatedAway)}</span>. Comments are hidden.
               </span>
@@ -301,7 +301,7 @@ export function Stage() {
             </div>
           )}
           {frameError && (
-            <div className="flex items-center gap-3 rounded-lg bg-panel px-3 py-2 text-[12.5px] text-ink shadow-pop hairline fade-up">
+            <div className="flex items-center gap-3 rounded-lg glass px-3 py-2 text-[12.5px] text-ink shadow-pop hairline toast-in">
               <span className="h-2 w-2 rounded-full bg-red" />
               {frameError}
               <Button size="sm" onClick={() => window.dispatchEvent(new CustomEvent("redline:reload"))}>
@@ -314,7 +314,7 @@ export function Stage() {
 
       {/* full-screen controls */}
       {fullscreen && (
-        <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ink/90 p-1 text-white shadow-pop backdrop-blur">
+        <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full glass-dark p-1 text-white shadow-pop toast-in">
           <Tip label={showComments ? "Hide comments & drawings" : "Show comments & drawings"} kbd="⇧C" side="top">
             <IconButton className="!text-white hover:!bg-white/10" onClick={() => set({ showComments: !showComments })}>
               {showComments ? <MessageCircle size={15} /> : <MessageCircleOff size={15} />}

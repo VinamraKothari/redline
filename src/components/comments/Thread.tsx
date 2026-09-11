@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Link2, MoreHorizontal, Pencil, RotateCcw, SmilePlus, Trash2, Unlink } from "lucide-react";
+import { Check, Link2, MoreHorizontal, Pencil, RotateCcw, SmilePlus, Trash2, Unlink, Mail, MailOpen } from "lucide-react";
 import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { repliesOf, useStore } from "@/lib/store";
@@ -211,6 +211,8 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
   const viewOnly = useStore((s) => s.viewOnly);
   const upsert = useStore((s) => s.upsertComment);
   const markRead = useStore((s) => s.markRead);
+  const markUnread = useStore((s) => s.markUnread);
+  const flaggedUnread = useStore((s) => s.readAt[rootId]?.startsWith("!") ?? false);
   const toast = useStore((s) => s.toast);
   const participants = useParticipants();
 
@@ -252,6 +254,25 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
         )}
         <span className="mono text-[10.5px] text-ink-3">· {root.viewport_width}</span>
         <div className="flex-1" />
+        <Tip label={flaggedUnread ? "Mark as read" : "Mark as unread (U)"} side="bottom">
+          <IconButton
+            size="sm"
+            aria-label={flaggedUnread ? "Mark as read" : "Mark as unread"}
+            aria-pressed={flaggedUnread}
+            className={flaggedUnread ? "!text-red" : ""}
+            onClick={() => {
+              if (flaggedUnread) {
+                markRead(root.id);
+                toast("Marked as read.", "success");
+              } else {
+                markUnread(root.id);
+                toast("Marked as unread — it stays flagged until you open it again.", "success");
+              }
+            }}
+          >
+            {flaggedUnread ? <MailOpen size={14} /> : <Mail size={14} />}
+          </IconButton>
+        </Tip>
         <Tip label={root.resolved ? "Reopen" : "Mark as resolved"} side="bottom">
           <IconButton size="sm" onClick={toggleResolve} aria-label={root.resolved ? "Reopen" : "Mark as resolved"} className={root.resolved ? "!text-green" : ""}>
             {root.resolved ? <RotateCcw size={14} /> : <Check size={15} />}

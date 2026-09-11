@@ -482,3 +482,65 @@ test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports
   const img = await frame.locator("img").first().getAttribute("src");
   expect(img).toMatch(/^http:\/\/localhost:3999\//);
 });
+
+test("read / unread: another member's reply flags the thread, U toggles, mark all read, state syncs via the account", async ({ page, browser }) => {
+  await createReview(page);
+  const url = page.url();
+  const reviewId = url.match(/\/r\/([a-z0-9]+)/)![1];
+  const review = await (await page.request.get(`/api/reviews/${reviewId}`)).json();
+  const pid = review.review.project_id as string;
+
+  // a thread by the creator, a reply by an editor
+  const pt = await pointIn(page, '[data-testid="headline"]', 0.1, 0.5);
+  await page.mouse.click(pt.x, pt.y);
+  await page.getByPlaceholder(/Leave a comment/).fill("Is the headline too heavy?");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("aside").getByText("Is the headline too heavy?")).toBeVisible();
+  const root = (await (await page.request.get(`/api/reviews/${reviewId}`)).json()).comments[0] as { id: string };
+
+  const editorCtx = await browser.newContext();
+  const ep = await editorCtx.newPage();
+  const editor = await signIn(ep, "Eve Editor");
+  await page.request.post(`/api/projects/${pid}/members`, { data: { email: editor.email, role: "edit" } });
+  await ep.request.get("/api/me");
+  const reply = await ep.request.post(`/api/reviews/${reviewId}/comments`, { data: { parent_id: root.id, body: "Yes — try 40px.", viewport_width: 1440 } });
+  expect(reply.ok()).toBeTruthy();
+
+  // the creator sees the reply arrive (realtime or reconcile) and the thread flagged unread
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await settle(page);
+  const tile = page.locator("aside").getByText("Is the headline too heavy?");
+  await expect(tile).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: /mark all read/ })).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: "Mark as read" })).toHaveCount(1);
+
+  // opening the thread reads it
+  await tile.click();
+  await expect(page.getByText("Yes — try 40px.")).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: /mark all read/ })).toHaveCount(0);
+
+  // U flags it unread again; it stays flagged while open
+  await page.keyboard.press("u");
+  await expect(page.getByText(/Marked as unread/)).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: /1 unread/ })).toBeVisible();
+  // the unread filter lists it
+  await page.locator("aside").getByRole("button", { name: /^All/ }).click();
+  await page.getByRole("menuitemradio", { name: "Unread" }).click();
+  await expect(page.locator("aside").getByText("Is the headline too heavy?")).toBeVisible();
+  await page.locator("aside").getByRole("button", { name: /^Unread/ }).click();
+  await page.getByRole("menuitemradio", { name: "All comments" }).click();
+
+  // the flag reaches the account (debounced) — another browser of the same user sees it
+  await expect.poll(async () => ((await (await page.request.get(`/api/reviews/${reviewId}/reads`)).json()).reads[root.id] as string | undefined) ?? "", { timeout: 8000 }).toMatch(/^!/);
+  const otherCtx = await browser.newContext();
+  const op = await otherCtx.newPage();
+  await signIn(op, "Priya Test");
+  await op.goto(url);
+  await expect(op.locator("aside").getByRole("button", { name: /1 unread/ })).toBeVisible();
+  // …and mark all read from there clears it everywhere
+  await op.locator("aside").getByRole("button", { name: /mark all read/ }).click();
+  await expect.poll(async () => ((await (await page.request.get(`/api/reviews/${reviewId}/reads`)).json()).reads[root.id] as string | undefined) ?? "", { timeout: 8000 }).not.toMatch(/^!/);
+  await otherCtx.close();
+  await editorCtx.close();
+});

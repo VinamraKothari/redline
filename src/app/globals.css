@@ -126,6 +126,76 @@ input:focus-visible, textarea:focus-visible { outline: none; }
 }
 .fade-up { animation: fade-up 160ms ease-out both; }
 
+/* ─── Motion ────────────────────────────────────────────────────────────────
+   Spring-like curves (critically damped, no overshoot): things scale in from
+   where they came from, and fade out faster than they arrived. */
+:root {
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out-quick: cubic-bezier(0.25, 1, 0.5, 1);
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-dark: rgba(28, 27, 24, 0.86);
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98); }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.965) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dialog-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98) translateY(4px); }
+}
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* floating menus & popovers grow out of their trigger */
+.pop {
+  transform-origin: var(--radix-popover-content-transform-origin, var(--radix-dropdown-menu-content-transform-origin, var(--radix-tooltip-content-transform-origin, top center)));
+  animation: pop-in 180ms var(--ease-spring) both;
+}
+.pop[data-state="closed"] { animation: pop-out 120ms var(--ease-out-quick) both; }
+.dialog-in { animation: dialog-in 240ms var(--ease-spring) both; }
+.dialog-in[data-state="closed"] { animation: dialog-out 140ms var(--ease-out-quick) both; }
+.overlay-in { animation: overlay-in 200ms ease-out both; }
+.overlay-in[data-state="closed"] { animation: overlay-out 140ms ease-out both; }
+.toast-in { animation: toast-in 260ms var(--ease-spring) both; }
+
+/* respond on press: buttons compress the instant they're touched */
+.press { transition: background-color 100ms ease-out, color 100ms ease-out, transform 100ms ease-out; }
+.press:active:not(:disabled) { transform: scale(0.96); }
+
+/* translucent chrome — floating bars let the page show through */
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+.glass-dark {
+  background: var(--glass-dark);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .glass-dark { background: var(--ink); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pop, .dialog-in, .toast-in, .fade-up, .pin-in { animation: overlay-in 150ms ease-out both; }
+  .pop[data-state="closed"], .dialog-in[data-state="closed"] { animation: overlay-out 100ms ease-out both; }
+  .press:active:not(:disabled) { transform: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
+
 @keyframes cursor-pulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--red-glow); }
   50% { box-shadow: 0 0 0 6px transparent; }

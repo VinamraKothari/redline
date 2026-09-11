@@ -46,7 +46,7 @@ export function DrawToolbar() {
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-xl bg-panel p-1 shadow-pop hairline fade-up">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-xl glass p-1 shadow-pop hairline toast-in">
         {TOOLS.map(({ t, Icon, label, kbd }) => (
           <Tip key={t} label={label} kbd={kbd} side="top">
             <IconButton active={tool === t} onClick={() => set({ tool: t, selectedShape: null })} aria-label={label}>

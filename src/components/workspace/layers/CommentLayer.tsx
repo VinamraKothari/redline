@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { useStore, threadRoots, repliesOf } from "@/lib/store";
+import { isUnread, useStore, threadRoots, repliesOf } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
 import { api } from "@/lib/api";
 import type { Comment } from "@/lib/types";
@@ -97,7 +97,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
         const replies = repliesOf(comments, c.id);
         const last = [c, ...replies].reduce((m, x) => (x.created_at > m ? x.created_at : m), "");
         const mineLast = [c, ...replies].every((x) => x.author_id === viewer.user_id);
-        const unread = !mineLast && (!readAt[c.id] || readAt[c.id] < last);
+        const unread = isUnread(readAt, c.id, last, !mineLast);
         return { c, x: pos.x, y: pos.y, detached: pos.detached, unread, replies: replies.length };
       })
       .filter(Boolean) as Placed[];

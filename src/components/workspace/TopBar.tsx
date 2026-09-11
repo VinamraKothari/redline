@@ -87,7 +87,7 @@ export function TopBar() {
     try {
       st.toast("Capturing the page…");
       await frame().warmUp();
-      const html = serializeDocument(doc);
+      const html = serializeDocument(doc, review.url);
       const { review: r } = await api.freeze(review.id, html);
       set({ review: r });
       RealtimeContext.current?.announceReview();

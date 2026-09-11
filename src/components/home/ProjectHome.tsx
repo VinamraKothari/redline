@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, ChevronLeft, FileCode2, Monitor, Pencil, Smartphone, Tablet, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
-import { ROLE_LABEL, VIEWPORTS, type Project, type ProjectInvite, type ProjectMember, type Role } from "@/lib/types";
+import { VIEWPORTS, type Project, type ProjectInvite, type ProjectMember, type Role } from "@/lib/types";
 import { cn, normalizeUrl } from "@/lib/util";
 import { Logo } from "@/components/Logo";
 import { Button, IconButton, Tip, TooltipProvider } from "@/components/ui/primitives";
@@ -188,7 +188,7 @@ export function ProjectHome({ id }: { id: string }) {
             </div>
             <p className="mt-1.5 min-h-[18px] text-[12.5px] text-ink-3">
               {data
-                ? `You are ${role === "admin" ? "an admin" : role === "edit" ? "an editor" : "a viewer"} · ${ROLE_LABEL[role]} · every member sees all pages in this project`
+                ? `You are ${role === "admin" ? "an admin — you can manage members and pages" : role === "edit" ? "an editor — you can comment, draw and add pages" : "a viewer — you can read and present"} · every member sees all pages in this project`
                 : ""}
             </p>
 

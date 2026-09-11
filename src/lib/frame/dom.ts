@@ -554,7 +554,93 @@ export function looksLikeScrollReveal(el: HTMLElement): boolean {
   return false;
 }
 
-export function serializeDocument(doc: Document): string {
+/**
+ * The site URL the page's relative references resolve against. Inside the
+ * reviewer the document's location is spoofed to the site's path on *our*
+ * origin (see bridge), so it is recombined with the site's origin here.
+ */
+function siteBaseFor(doc: Document, siteUrl?: string): string | null {
+  const loc = doc.location;
+  try {
+    if (loc.pathname.startsWith("/api/proxy")) {
+      const u = new URL(loc.href).searchParams.get("url");
+      if (u) return new URL(u).href;
+    }
+    if (siteUrl && !siteUrl.startsWith("upload://")) {
+      // an already-frozen page is served from /api/snapshot: its own URL is the base
+      if (loc.pathname.startsWith("/api/")) return new URL(siteUrl).href;
+      return new URL(loc.pathname + loc.search, siteUrl).href;
+    }
+    if (siteUrl) return null;
+    return /^https?:/.test(doc.baseURI) ? doc.baseURI : null;
+  } catch {
+    return null;
+  }
+}
+
+const RELATIVE = /^(?!(?:[a-z][a-z0-9+.-]*:|\/\/|#))/i;
+
+/**
+ * Snapshots are served from our origin, where the page's root-relative
+ * references (`/images/x.jpg`, added by the site's own scripts after the
+ * proxy rewrote the document) would only resolve for a viewer whose browser
+ * still carries the site cookie. Point them at the site itself.
+ */
+function absolutizeSnapshot(root: HTMLElement, base: string): void {
+  const abs = (v: string): string | null => {
+    const s = v.trim();
+    if (!s || !RELATIVE.test(s)) return null;
+    // Redline's own routes (the bridge, proxied assets) stay on this origin
+    if (/^\/(?:api\/|bridge\.js(?:$|\?))/.test(s)) return null;
+    try {
+      return new URL(s, base).href;
+    } catch {
+      return null;
+    }
+  };
+  const fix = (selector: string, attr: string) => {
+    root.querySelectorAll(selector).forEach((el) => {
+      const v = el.getAttribute(attr);
+      const a = v && abs(v);
+      if (a) el.setAttribute(attr, a);
+    });
+  };
+  fix("img[src], source[src], video[src], audio[src], track[src], iframe[src], embed[src], input[type='image'][src]", "src");
+  fix("video[poster]", "poster");
+  fix("object[data]", "data");
+  fix("use[href], image[href]", "href");
+  fix("link[href], a[href], area[href]", "href");
+  fix("form[action]", "action");
+  fix("[data-src]", "data-src");
+  root.querySelectorAll("img[srcset], source[srcset]").forEach((el) => {
+    const v = el.getAttribute("srcset");
+    if (!v) return;
+    el.setAttribute(
+      "srcset",
+      v
+        .split(",")
+        .map((part) => {
+          const [u, ...rest] = part.trim().split(/\s+/);
+          const a = u ? abs(u) : null;
+          return [a || u, ...rest].join(" ");
+        })
+        .join(", "),
+    );
+  });
+  root.querySelectorAll<HTMLElement>("[style*='url(']").forEach((el) => {
+    const v = el.getAttribute("style");
+    if (!v) return;
+    el.setAttribute(
+      "style",
+      v.replace(/url\((\s*(['"]?))([^'")]+)\2\s*\)/g, (m, _pre, q, u) => {
+        const a = abs(u);
+        return a ? `url(${q}${a}${q})` : m;
+      }),
+    );
+  });
+}
+
+export function serializeDocument(doc: Document, siteUrl?: string): string {
   const clone = doc.documentElement.cloneNode(true) as HTMLElement;
   // Inline the live stylesheets so the snapshot survives origin CSS changes.
   const styles: string[] = [];
@@ -586,6 +672,8 @@ export function serializeDocument(doc: Document): string {
     } else if (live instanceof HTMLTextAreaElement) c.textContent = live.value;
   });
   revealHidden(clone);
+  const base = siteBaseFor(doc, siteUrl);
+  if (base) absolutizeSnapshot(clone, base);
   const style = doc.createElement("style");
   style.setAttribute("data-redline-frozen-styles", "1");
   style.textContent = styles.join("\n");

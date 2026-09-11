@@ -16,9 +16,10 @@ interface Store {
   projects: Record<string, Project>;
   members: Record<string, ProjectMember>; // key: project_id/user_id
   invites: Record<string, ProjectInvite>;
+  reads: Record<string, Record<string, string>>; // key: user_id/review_id
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {} });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {} });
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -287,6 +288,16 @@ const impl: DbAdapter = {
     } catch {
       return null;
     }
+  },
+
+  async getReads(userId, reviewId) {
+    const s = await load();
+    return s.reads[`${userId}/${reviewId}`] ?? {};
+  },
+  async putReads(userId, reviewId, reads) {
+    const s = await load();
+    s.reads[`${userId}/${reviewId}`] = reads;
+    await persist();
   },
 
   async putThumbnail(reviewId, bytes) {

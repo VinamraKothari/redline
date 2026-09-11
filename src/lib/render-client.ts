@@ -64,7 +64,7 @@ export async function renderOnServer(kind: "png" | "jira", opts: { warm?: boolea
   const doc = frame().doc;
   if (!st.review || !doc) throw new Error("The page hasn't loaded yet.");
   if (opts.warm !== false) await frame().warmUp();
-  const html = serializeDocument(doc);
+  const html = serializeDocument(doc, st.review.url);
   const payload = JSON.stringify({ kind, html, width: st.viewport, pins: currentPins(st.comments, st.viewport), overlaySvg: overlaySvg() });
   const { body, gz } = await gzip(payload);
   const res = await fetch(`/api/reviews/${st.review.id}/render`, {

@@ -37,7 +37,7 @@ export function CaptureStateDialog({ open, onOpenChange }: { open: boolean; onOp
     if (!doc) return toast("The page hasn't loaded yet.", "error");
     setBusy(true);
     try {
-      const html = serializeDocument(doc);
+      const html = serializeDocument(doc, review.url);
       const { review: r } = await api.createReview({
         project_id: review.project_id!,
         url: review.url.startsWith("upload://") ? undefined : review.url,

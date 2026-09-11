@@ -49,6 +49,10 @@ export interface DbAdapter {
   deleteShapes(reviewId: string, viewport: number | null): Promise<void>;
 
   /** snapshot html storage */
+  /** per-user read state of a review's threads (thread id -> ISO read time, "!" + time = marked unread) */
+  getReads(userId: string, reviewId: string): Promise<Record<string, string>>;
+  putReads(userId: string, reviewId: string, reads: Record<string, string>): Promise<void>;
+
   putSnapshot(path: string, html: string): Promise<void>;
   getSnapshot(path: string): Promise<string | null>;
 
