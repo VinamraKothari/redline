@@ -5,16 +5,52 @@ import type { PublicReview } from "./review";
 
 export type ProjectSummary = Project & { role: Role; review_count: number; preview_urls: string[] };
 
+const RETRY_STATUS = new Set([408, 425, 429, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function friendly(status: number): string {
+  if (status === 413) return "That's too large to send (limit ~4 MB). Try a smaller image.";
+  if (status === 504 || status === 502 || status === 503) return "The server took too long to answer — please try again.";
+  if (status === 429) return "Too many requests at once — please wait a moment.";
+  if (status === 401) return "Your session has expired — sign in again.";
+  if (status === 403) return "You don't have permission to do that.";
+  if (status === 404) return "That no longer exists.";
+  return `Request failed (${status})`;
+}
+
+/**
+ * fetch + JSON with retries: transient network errors and gateway/rate-limit
+ * responses are retried with a short back-off (two extra attempts), so a
+ * blip never surfaces as an error to someone in the middle of a review.
+ */
 async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string>) };
-  const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (res.status === 401 && typeof window !== "undefined") {
-    // session gone: back to sign-in, then straight back here
-    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  let attempt = 0;
+  for (;;) {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, headers, credentials: "same-origin" });
+    } catch (e) {
+      if (attempt < 2 && typeof navigator !== "undefined" && navigator.onLine !== false) {
+        attempt++;
+        await sleep(400 * attempt * attempt);
+        continue;
+      }
+      throw new Error("No connection — check your network and try again.");
+    }
+    if (RETRY_STATUS.has(res.status) && attempt < 2) {
+      attempt++;
+      await sleep(500 * attempt * attempt);
+      continue;
+    }
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    if (res.status === 401 && typeof window !== "undefined") {
+      // session gone: back to sign-in, then straight back here
+      window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    }
+    if (!res.ok) throw new Error(data.error || friendly(res.status));
+    return data;
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
 }
 
 export const api = {
@@ -123,7 +159,21 @@ export const api = {
     return call<{ ok: true }>(`/api/reviews/${reviewId}/shapes${q}`, { method: "DELETE" });
   },
 
-  freeze(reviewId: string, html: string) {
-    return call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { method: "POST", body: JSON.stringify({ html }) });
+  async freeze(reviewId: string, html: string) {
+    // big pages: gzip in the browser so the upload stays well under the platform's body limit
+    const json = JSON.stringify({ html });
+    if (typeof CompressionStream !== "undefined" && json.length > 200_000) {
+      try {
+        const body = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+        return await call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream", "x-redline-gzip": "1" },
+          body,
+        });
+      } catch {
+        /* fall through to plain JSON */
+      }
+    }
+    return call<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { method: "POST", body: json });
   },
 };

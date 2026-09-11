@@ -60,9 +60,16 @@ export function attachmentUrl(origin: string, comment: Comment, att: Comment["at
  * from the URL while importing.
  */
 function jiraAttachment(origin: string, c: Comment, att: Comment["attachments"][number]): string {
-  const ext = att.url.startsWith("data:image/png") ? "png" : att.url.startsWith("data:image/webp") ? "webp" : "jpg";
+  const ext = att.url.startsWith("data:image/png") ? "png" : att.url.startsWith("data:image/webp") ? "webp" : /\.png(\?|$)/i.test(att.url) ? "png" : "jpg";
   const base = (att.name || "image").replace(/[^\w.-]+/g, "-").replace(/\.[^.]+$/, "") || "image";
-  return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${attachmentUrl(origin, c, att)}`;
+  // files already in storage are public; inline (older) images are served by /api/attachments
+  const url = /^https?:\/\//i.test(att.url) ? att.url : attachmentUrl(origin, c, att);
+  return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${url}`;
+}
+
+/** Order of threads in the CSV = numbering of the markers on the rendered screenshots. */
+export function threadOrder(comments: Comment[]): Comment[] {
+  return bundle(comments).map((t) => t.root);
 }
 
 /**
@@ -71,10 +78,17 @@ function jiraAttachment(origin: string, c: Comment, att: Comment["attachments"][
  * Created, Comment (×N, "date;author;body"), Attachment (×N), plus extra
  * columns you can map to custom fields or skip.
  */
-export function toJiraCsv(review: PublicReview, comments: Comment[], origin: string): string {
+export function toJiraCsv(review: PublicReview, comments: Comment[], origin: string, screenshots: Record<string, string> = {}): string {
   const threads = bundle(comments);
   const maxReplies = Math.max(0, ...threads.map((t) => t.replies.length));
-  const attachmentsOf = ({ root, replies }: ThreadBundle) => [root, ...replies].flatMap((c) => (c.attachments || []).map((a) => jiraAttachment(origin, c, a)));
+  const attachmentsOf = ({ root, replies }: ThreadBundle) => {
+    const n = threads.findIndex((t) => t.root.id === root.id) + 1;
+    const shot = screenshots[root.id];
+    return [
+      ...(shot ? [`${jiraDate(root.created_at)};${root.author_name};redline-${n}.jpg;${shot}`] : []),
+      ...[root, ...replies].flatMap((c) => (c.attachments || []).map((a) => jiraAttachment(origin, c, a))),
+    ];
+  };
   const maxAttachments = Math.max(0, ...threads.map((t) => attachmentsOf(t).length));
   const header = [
     "Summary",
@@ -105,6 +119,7 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       `*Viewport:* ${root.viewport_width}px`,
       root.anchor?.region ? `*Region:* ${Math.round(root.anchor.region.w)}×${Math.round(root.anchor.region.h)}px` : null,
       `*Open in Redline:* ${link}`,
+      screenshots[root.id] ? `*Screenshot:* ${screenshots[root.id]}` : null,
       atts.length ? `*Attachments:* ${atts.length} image(s), attached to this issue` : null,
     ]
       .filter((x) => x !== null)

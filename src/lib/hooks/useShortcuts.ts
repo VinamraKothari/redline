@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useStore, threadRoots } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
+import { VIEWPORTS } from "@/lib/types";
 
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
@@ -27,6 +28,7 @@ export function useShortcuts() {
       const k = e.key.toLowerCase();
 
       if (e.key === "Escape") {
+        if (st.hoverLocked) return frame().lockHover(false);
         if (st.fullscreen) return st.set({ fullscreen: false });
         if (st.draft) return st.set({ draft: null });
         if (st.activeThread) return st.set({ activeThread: null });
@@ -63,8 +65,35 @@ export function useShortcuts() {
       }
       if (mod) return;
 
+      // viewports: 1 = desktop, 2 = tablet, 3 = phone (repeat to cycle sizes of that kind)
+      if (k === "1" || k === "2" || k === "3") {
+        const kind = k === "1" ? "desktop" : k === "2" ? "tablet" : "mobile";
+        const list = VIEWPORTS.filter((v) => v.kind === kind);
+        const i = list.findIndex((v) => v.width === st.viewport);
+        const next = list[(i + 1) % list.length];
+        st.set({ viewport: next.width, fitZoom: true, selected: null, hover: null, measureTarget: null });
+        return;
+      }
+      if (k === "r" && !e.shiftKey && st.mode !== "draw") {
+        window.dispatchEvent(new CustomEvent("redline:reload"));
+        return;
+      }
+      if (e.shiftKey && k === "s") {
+        window.dispatchEvent(new CustomEvent("redline:share"));
+        return;
+      }
+
       if (st.viewOnly) {
         if (k === "f") st.set({ fullscreen: !st.fullscreen });
+        if (k === "h" && st.frameReady) frame().lockHover(!st.hoverLocked);
+        return;
+      }
+      if (e.shiftKey && k === "f") {
+        window.dispatchEvent(new CustomEvent("redline:freeze"));
+        return;
+      }
+      if (e.shiftKey && k === "j") {
+        window.dispatchEvent(new CustomEvent("redline:scripts"));
         return;
       }
 
@@ -104,6 +133,7 @@ export function useShortcuts() {
           break;
         case "h":
           if (st.mode === "draw") st.set({ tool: "highlighter" });
+          else if (st.frameReady) frame().lockHover(!st.hoverLocked);
           break;
         case "l":
           if (st.mode === "draw") st.set({ tool: "line" });

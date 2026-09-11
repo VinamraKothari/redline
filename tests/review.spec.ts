@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -345,6 +346,83 @@ test("a client re-render that swaps the <html> element is not treated as a crash
   await expect(page.getByText(/scripts crashed inside the reviewer/)).toHaveCount(0);
   // the new root is adopted so comments can still anchor to it
   await expect(frame.locator("html")).toHaveAttribute("data-redline", "1");
+});
+
+test("lock hover (H): CSS and JS hover menus stay open while the pointer is elsewhere", async ({ page }) => {
+  const frame = await createReview(page, FIXTURE.replace(/site\.html$/, "hover.html"));
+  await expect(frame.locator("#css-trigger")).toBeVisible();
+  // hover the CSS menu inside the page (browse mode: the page gets the pointer)
+  await page.keyboard.press("v");
+  const t = await pointIn(page, "#css-trigger", 0.5, 0.5);
+  await page.mouse.move(t.x, t.y);
+  await expect(frame.locator("#css-panel")).toBeVisible();
+  await page.keyboard.press("h");
+  await expect(page.getByText(/Hover state locked/)).toBeVisible();
+  // leave for the toolbar: the panel must stay
+  await page.mouse.move(20, 20);
+  await page.waitForTimeout(300);
+  await expect(frame.locator("#css-panel")).toBeVisible();
+  // comment on the pinned panel
+  await page.keyboard.press("c");
+  const panel = await pointIn(page, "#css-panel", 0.5, 0.5);
+  await page.mouse.click(panel.x, panel.y);
+  await expect(page.getByPlaceholder(/Leave a comment/)).toBeVisible();
+  await page.keyboard.press("Escape");
+  // release (pointer away from the menu)
+  await page.keyboard.press("v");
+  await page.mouse.move(20, 20);
+  await page.keyboard.press("h");
+  await expect(page.getByText(/Hover state locked/)).toHaveCount(0);
+  await expect(frame.locator("#css-panel")).toBeHidden();
+
+  // JS-driven menu (mouseenter / mouseleave with a close timer)
+  const j = await pointIn(page, "#js-trigger", 0.5, 0.5);
+  await page.mouse.move(j.x, j.y);
+  await expect(frame.locator("#js-panel")).toBeVisible();
+  await page.keyboard.press("h");
+  await page.mouse.move(20, 20);
+  await page.waitForTimeout(400);
+  await expect(frame.locator("#js-panel")).toBeVisible();
+  await page.keyboard.press("Escape"); // Esc releases the lock first
+  await expect(page.getByText(/Hover state locked/)).toHaveCount(0);
+  // the page's own scripts are back in charge: hover in and out closes it again
+  await page.mouse.move(j.x, j.y);
+  await page.mouse.move(20, 20);
+  await expect(frame.locator("#js-panel")).toBeHidden();
+});
+
+test("exports: PNG sections and a Jira CSV with a rendered screenshot per comment", async ({ page }) => {
+  await createReview(page);
+  const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
+  const c = await page.request.post(`/api/reviews/${id}/comments`, {
+    data: { title: "Hero copy", body: "Tighten this line.", viewport_width: 1440, anchor: { selector: "h1", fx: 0.5, fy: 0.5, px: 300, py: 120 } },
+  });
+  expect(c.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
+  await page.keyboard.press("Shift+S");
+  await expect(page.getByText("Share this review")).toBeVisible();
+
+  // Jira CSV: the render happens on the server; the row carries a public screenshot URL
+  const csvDl = page.waitForEvent("download", { timeout: 90_000 });
+  await page.getByRole("button", { name: /Jira CSV/ }).click();
+  const csv = await (await csvDl).path();
+  const text = readFileSync(csv!, "utf8");
+  expect(text).toMatch(/Attachment/);
+  const m = text.match(/redline-1\.jpg;(\S+?)[",]/);
+  expect(m).toBeTruthy();
+  const shot = await page.request.get(m![1]);
+  expect(shot.status()).toBe(200);
+  expect(shot.headers()["content-type"]).toMatch(/image\/jpeg/);
+  expect((await shot.body()).byteLength).toBeGreaterThan(5000);
+
+  // PNG: a single section for this short page
+  const pngDl = page.waitForEvent("download", { timeout: 90_000 });
+  await page.getByRole("button", { name: /^PNG/ }).click();
+  const png = await (await pngDl).path();
+  const bytes = readFileSync(png!);
+  expect(bytes.subarray(1, 4).toString()).toBe("PNG");
+  expect(bytes.byteLength).toBeGreaterThan(20_000);
 });
 
 test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports go through the proxy", async ({ page }) => {

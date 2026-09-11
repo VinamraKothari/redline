@@ -55,4 +55,15 @@ export interface DbAdapter {
   /** page preview images; returns the public URL to store on the review */
   putThumbnail(reviewId: string, bytes: Uint8Array, contentType: string): Promise<string>;
   getThumbnail(reviewId: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
+
+  /**
+   * Generic files. Public files (comment attachments, Jira screenshots) get a
+   * permanent URL anyone can open; private files (PNG exports) are read back
+   * through a short-lived signed URL.
+   */
+  putPublicFile(path: string, bytes: Uint8Array, contentType: string): Promise<string>;
+  putPrivateFile(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  privateFileUrl(path: string, ttlSeconds: number): Promise<string>;
+  /** local adapter only: read a stored file back (served by /api/files) */
+  getFile(kind: "public" | "private", path: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }

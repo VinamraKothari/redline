@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Code2, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { AccountMenu } from "@/components/home/AccountMenu";
@@ -41,6 +41,26 @@ export function TopBar() {
       return true;
     });
   }, [viewers, viewer.user_id]);
+
+  // keyboard shortcuts dispatch these (see useShortcuts)
+  useEffect(() => {
+    const share = () => setShare((o) => !o);
+    const freeze = () => void toggleFreeze();
+    const scriptsToggle = () => {
+      const st = useStore.getState();
+      if (st.review?.mode !== "live") return;
+      st.set({ scripts: !st.scripts, frameReady: false, frameError: null, navigatedAway: null, hover: null, selected: null, measureTarget: null });
+    };
+    window.addEventListener("redline:share", share);
+    window.addEventListener("redline:freeze", freeze);
+    window.addEventListener("redline:scripts", scriptsToggle);
+    return () => {
+      window.removeEventListener("redline:share", share);
+      window.removeEventListener("redline:freeze", freeze);
+      window.removeEventListener("redline:scripts", scriptsToggle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review?.id, review?.mode]);
 
   async function toggleFreeze() {
     if (!review) return;
@@ -155,7 +175,7 @@ export function TopBar() {
         </Tip>
       </div>
 
-      <Tip label="Reload page" side="bottom">
+      <Tip label="Reload page" kbd="R" side="bottom">
         <IconButton onClick={() => window.dispatchEvent(new CustomEvent("redline:reload"))}>
           <RotateCw size={15} />
         </IconButton>
@@ -164,6 +184,7 @@ export function TopBar() {
       {review?.mode === "live" && (
         <Tip
           label={scripts ? "Site scripts: on — click for a static render (server HTML + CSS only)" : "Site scripts: off (static render) — click to run the page's JavaScript"}
+          kbd="⇧J"
           side="bottom"
         >
           <IconButton
@@ -191,7 +212,7 @@ export function TopBar() {
       <div className="mx-1 h-5 w-px bg-line" />
 
       {!viewOnly && review && review.mode !== "upload" && (
-        <Tip label={review.mode === "frozen" ? "Unfreeze — go back to the live page" : "Freeze — capture this exact version for everyone"} side="bottom">
+        <Tip label={review.mode === "frozen" ? "Unfreeze — go back to the live page" : "Freeze — capture this exact version for everyone"} kbd="⇧F" side="bottom">
           <IconButton onClick={toggleFreeze} disabled={freezing} active={review.mode === "frozen"}>
             {review.mode === "frozen" ? <Sun size={15} /> : <Snowflake size={15} />}
           </IconButton>
@@ -204,9 +225,11 @@ export function TopBar() {
         </IconButton>
       </Tip>
 
-      <Button variant="primary" onClick={() => setShare(true)} className="ml-1">
-        <Share2 size={13} /> Share
-      </Button>
+      <Tip label="Share & export" kbd="⇧S" side="bottom">
+        <Button variant="primary" onClick={() => setShare(true)} className="ml-1">
+          <Share2 size={13} /> Share
+        </Button>
+      </Tip>
       <ShareDialog open={share} onOpenChange={setShare} />
       <div className="ml-1">
         <AccountMenu size={26} />

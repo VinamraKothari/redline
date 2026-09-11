@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hover — fixture</title>
+  <style>
+    body { margin: 0; font: 16px Arial, sans-serif; }
+    nav { display: flex; gap: 40px; padding: 24px; background: #f3f4f6; }
+    .menu { position: relative; }
+    .menu .panel { display: none; position: absolute; top: 32px; left: 0; width: 220px; padding: 16px; background: #fff; border: 1px solid #ddd; }
+    .menu:hover .panel { display: block; }
+    #js-panel { position: absolute; top: 80px; left: 300px; width: 220px; padding: 16px; background: #fff; border: 1px solid #ddd; }
+    .tall { height: 1600px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="menu" id="css-menu"><button id="css-trigger">CSS menu</button><div class="panel" id="css-panel">CSS panel content</div></div>
+    <div id="js-trigger">JS menu</div>
+  </nav>
+  <div id="js-panel" hidden>JS panel content</div>
+  <div class="tall"></div>
+  <script>
+    var t = document.getElementById("js-trigger"), p = document.getElementById("js-panel"), timer;
+    t.addEventListener("mouseenter", function () { clearTimeout(timer); p.hidden = false; });
+    t.addEventListener("mouseleave", function () { timer = setTimeout(function () { p.hidden = true; }, 120); });
+    p.addEventListener("mouseenter", function () { clearTimeout(timer); });
+    p.addEventListener("mouseleave", function () { timer = setTimeout(function () { p.hidden = true; }, 120); });
+  </script>
+</body>
+</html>

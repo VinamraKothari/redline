@@ -58,6 +58,8 @@ interface State {
   navigatedAway: string | null;
   /** run the reviewed site's own scripts (off = static render) */
   scripts: boolean;
+  /** the page's hover/focus state is pinned (bridge "hover lock") */
+  hoverLocked: boolean;
   layoutTick: number; // bump to re-anchor pins
 
   // comments
@@ -123,6 +125,7 @@ export const useStore = create<State>((set, get) => ({
   frameError: null,
   navigatedAway: null,
   scripts: true,
+  hoverLocked: false,
   layoutTick: 0,
 
   showComments: true,

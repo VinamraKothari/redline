@@ -15,6 +15,8 @@ export class FrameController {
   private raf = 0;
   private mutationTimer = 0;
   onNavigate: ((url: string, newTab: boolean) => void) | null = null;
+  /** overlay elements that must move with the page (translated by -scroll) */
+  private followers = new Set<HTMLElement>();
   /** the page's own scripts destroyed the document (see bridge.ts) */
   onCrashed: ((reason: string) => void) | null = null;
 
@@ -30,6 +32,12 @@ export class FrameController {
       if (d.type === "navigate") this.onNavigate?.(d.url, Boolean(d.newTab || d.popup));
       if (d.type === "blocked-submit") useStore.getState().toast("Form submissions are disabled while reviewing.");
       if (d.type === "crashed") this.onCrashed?.(String(d.reason || ""));
+      if (d.type === "hover-locked") {
+        useStore.getState().set({ hoverLocked: true });
+        if (!d.count)
+          useStore.getState().toast("Nothing is hovered right now. Switch to Browse (V), hover the menu or element, press H to lock it, then comment or inspect it.");
+      }
+      if (d.type === "hover-unlocked") useStore.getState().set({ hoverLocked: false });
     };
     window.addEventListener("message", onMsg);
     this.cleanup.push(() => iframe.removeEventListener("load", onLoad), () => window.removeEventListener("message", onMsg));
@@ -81,16 +89,25 @@ export class FrameController {
       st.set({ frameReady: false, frameError: doc.title || "The page could not be loaded." });
       return;
     }
-    st.set({ frameReady: true, frameError: null, scroll: { x: win.scrollX, y: win.scrollY } });
+    st.set({ frameReady: true, frameError: null, hoverLocked: false, scroll: { x: win.scrollX, y: win.scrollY } });
     this.reportSize();
 
+    // Overlays follow the page synchronously, inside the scroll event itself
+    // (before the browser paints); React state follows a frame later for the
+    // logic that needs it. A non-passive wheel listener keeps wheel scrolling
+    // on the main thread so the page and the overlays move in the same frame
+    // instead of the compositor moving the page one frame ahead.
     const onScroll = () => {
+      this.applyScroll(win.scrollX, win.scrollY);
       cancelAnimationFrame(this.raf);
       this.raf = requestAnimationFrame(() => {
         useStore.getState().set({ scroll: { x: win.scrollX, y: win.scrollY } });
       });
     };
     win.addEventListener("scroll", onScroll, { passive: true });
+    const onWheel = () => {};
+    doc.addEventListener("wheel", onWheel, { passive: false });
+    this.applyScroll(win.scrollX, win.scrollY);
 
     const ro = new ResizeObserver(() => this.reportSize());
     ro.observe(doc.documentElement);
@@ -118,11 +135,31 @@ export class FrameController {
 
     this.docCleanup.push(
       () => win.removeEventListener("scroll", onScroll),
+      () => doc.removeEventListener("wheel", onWheel),
       () => ro.disconnect(),
       () => mo.disconnect(),
       () => doc.removeEventListener("keydown", onKey),
       () => doc.removeEventListener("keyup", onKey),
     );
+  }
+
+  /** Register an overlay element positioned in page coordinates. Returns the unregister function. */
+  follow(el: HTMLElement): () => void {
+    this.followers.add(el);
+    const win = this.win;
+    const x = win?.scrollX ?? useStore.getState().scroll.x;
+    const y = win?.scrollY ?? useStore.getState().scroll.y;
+    el.style.transform = `translate(${-x}px, ${-y}px)`;
+    return () => {
+      this.followers.delete(el);
+    };
+  }
+
+  private applyScroll(x: number, y: number) {
+    const t = `translate(${-x}px, ${-y}px)`;
+    this.followers.forEach((el) => {
+      el.style.transform = t;
+    });
   }
 
   private reportSize() {
@@ -186,6 +223,15 @@ export class FrameController {
     const r = pageRect(el);
     if (r.w === 0 && r.h === 0) return { x: a.px, y: a.py, detached: true, rect: null };
     return { x: r.x + a.fx * r.w, y: r.y + a.fy * r.h, detached: false, rect: r };
+  }
+
+  /** Pin / release the page's current hover state (see bridge.ts). */
+  lockHover(on: boolean) {
+    try {
+      this.win?.postMessage({ __redline: true, type: on ? "hover-lock" : "hover-unlock" }, "*");
+    } catch {
+      /* ignore */
+    }
   }
 
   scrollBy(dx: number, dy: number) {

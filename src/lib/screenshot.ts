@@ -42,7 +42,7 @@ function isNoise(url: string): boolean {
 }
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Redline/1.0 (+design review preview)";
-const NAV_TIMEOUT = 15_000;
+export const NAV_TIMEOUT = 15_000;
 const TOTAL_TIMEOUT = 40_000;
 
 function onLambda(): boolean {
@@ -53,7 +53,7 @@ export function screenshotsAvailable(): boolean {
   return !!process.env.REDLINE_CHROME_PATH || onLambda();
 }
 
-async function launch(width: number, height: number, scale: number): Promise<Browser> {
+export async function launchBrowser(width: number, height: number, scale: number): Promise<Browser> {
   const local = process.env.REDLINE_CHROME_PATH;
   if (local) {
     return puppeteer.launch({
@@ -79,7 +79,7 @@ export async function screenshotPage(opts: ShotOptions): Promise<Uint8Array> {
   const height = Math.max(400, Math.min(opts.height ?? Math.round(width * 0.75), 2000));
   const scale = Math.min(1, (opts.outWidth ?? 800) / width);
 
-  const browser = await launch(width, height, scale);
+  const browser = await launchBrowser(width, height, scale);
   const killer = setTimeout(() => browser.close().catch(() => {}), TOTAL_TIMEOUT);
   try {
     const page = await browser.newPage();

@@ -9,7 +9,11 @@ import { cn, colorFor } from "@/lib/util";
 
 export const EMOJIS = ["👍", "👎", "❤️", "🔥", "👀", "✅", "❌", "🎉", "😂", "🤔", "💡", "⚠️", "🙏", "💯", "😍", "🚀", "🐛", "✨", "👏", "🤷"];
 
-/** Shrinks an image to ≤1400px on its long edge and returns a JPEG/PNG data URL. */
+/**
+ * Shrinks an image to ≤1400px on its long edge, uploads it and returns an
+ * attachment with a storage URL. If the upload fails the image is kept inline
+ * (data URL) so the comment can still be sent.
+ */
 export async function fileToAttachment(file: File): Promise<Attachment | null> {
   if (!file.type.startsWith("image/")) return null;
   const url = URL.createObjectURL(file);
@@ -27,7 +31,21 @@ export async function fileToAttachment(file: File): Promise<Attachment | null> {
     c.height = Math.round(img.height * s);
     c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
     const isPng = file.type === "image/png" && file.size < 600_000;
-    const data = c.toDataURL(isPng ? "image/png" : "image/jpeg", 0.85);
+    const type = isPng ? "image/png" : "image/jpeg";
+    const blob = await new Promise<Blob | null>((res) => c.toBlob(res, type, 0.85));
+    const reviewId = useStore.getState().review?.id;
+    if (blob && reviewId) {
+      try {
+        const r = await fetch(`/api/reviews/${reviewId}/attachments`, { method: "POST", headers: { "content-type": type }, body: blob, credentials: "same-origin" });
+        if (r.ok) {
+          const { id, url } = (await r.json()) as { id: string; url: string };
+          return { id, name: file.name, url, w: c.width, h: c.height };
+        }
+      } catch {
+        /* fall back to inline below */
+      }
+    }
+    const data = c.toDataURL(type, 0.85);
     return { id: Math.random().toString(36).slice(2, 10), name: file.name, url: data, w: c.width, h: c.height };
   } finally {
     URL.revokeObjectURL(url);

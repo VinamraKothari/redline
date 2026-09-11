@@ -185,6 +185,81 @@
     true,
   );
 
+  // ── Hover lock ───────────────────────────────────────────────────────────
+  // Menus, tooltips and hover cards vanish the moment the pointer leaves for
+  // the toolbar. On request from the host, pin the page's current hover state:
+  // every element that is :hover / :focus-within right now gets an attribute,
+  // every stylesheet rule that mentions :hover / :focus-within is cloned to
+  // match that attribute, and the pointer-leave family of events no longer
+  // reaches the page's scripts, so JS-driven menus stay open as well.
+  const HOVER_ATTR = "data-redline-hover";
+  const FOCUS_ATTR = "data-redline-focus";
+  const BLOCKED = ["mouseout", "mouseleave", "pointerout", "pointerleave", "mouseover", "mouseenter", "pointerover", "pointerenter", "focusout", "blur"];
+  let hoverLocked = false;
+  let hoverStyle: HTMLStyleElement | null = null;
+  const swallow = (e: Event) => {
+    if (hoverLocked) e.stopImmediatePropagation();
+  };
+  BLOCKED.forEach((t) => window.addEventListener(t, swallow, true));
+
+  const cloneHoverRules = (): string => {
+    const out: string[] = [];
+    const walk = (rules: CSSRuleList, wrap: (css: string) => string) => {
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSStyleRule) {
+          const sel = rule.selectorText;
+          if (!sel || !/:hover|:focus-within/.test(sel)) continue;
+          const next = sel.replace(/:hover/g, `[${HOVER_ATTR}]`).replace(/:focus-within/g, `[${FOCUS_ATTR}]`);
+          out.push(wrap(`${next}{${rule.style.cssText}}`));
+        } else if (rule instanceof CSSMediaRule) {
+          walk(rule.cssRules, (css) => wrap(`@media ${rule.conditionText}{${css}}`));
+        } else if (rule instanceof CSSSupportsRule) {
+          walk(rule.cssRules, (css) => wrap(`@supports ${rule.conditionText}{${css}}`));
+        } else if ("cssRules" in rule && (rule as CSSGroupingRule).cssRules && rule.constructor.name === "CSSLayerBlockRule") {
+          walk((rule as CSSGroupingRule).cssRules, wrap);
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        walk(sheet.cssRules, (css) => css);
+      } catch {
+        /* cross-origin sheet */
+      }
+    }
+    return out.join("\n");
+  };
+
+  const lockHover = () => {
+    if (hoverLocked) return;
+    hoverLocked = true;
+    document.querySelectorAll(":hover").forEach((el) => el.setAttribute(HOVER_ATTR, ""));
+    document.querySelectorAll(":focus-within").forEach((el) => el.setAttribute(FOCUS_ATTR, ""));
+    hoverStyle = document.createElement("style");
+    hoverStyle.setAttribute("data-redline-hover-lock", "1");
+    hoverStyle.textContent = cloneHoverRules();
+    document.head.appendChild(hoverStyle);
+    post({ type: "hover-locked", count: document.querySelectorAll(`[${HOVER_ATTR}]`).length });
+  };
+  const unlockHover = () => {
+    if (!hoverLocked) return;
+    hoverLocked = false;
+    hoverStyle?.remove();
+    hoverStyle = null;
+    document.querySelectorAll(`[${HOVER_ATTR}],[${FOCUS_ATTR}]`).forEach((el) => {
+      el.removeAttribute(HOVER_ATTR);
+      el.removeAttribute(FOCUS_ATTR);
+    });
+    post({ type: "hover-unlocked" });
+  };
+  window.addEventListener("message", (e) => {
+    if (e.source !== window.parent) return;
+    const d = e.data as { __redline?: boolean; type?: string } | null;
+    if (!d || !d.__redline) return;
+    if (d.type === "hover-lock") lockHover();
+    if (d.type === "hover-unlock") unlockHover();
+  });
+
   // ── Crash detection ──────────────────────────────────────────────────────
   // If a client-side framework still throws after hydration and replaces the
   // whole document with an error screen (Next.js: <html id="__next_error__">),

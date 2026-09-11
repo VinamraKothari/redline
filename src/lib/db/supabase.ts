@@ -236,4 +236,22 @@ export const supabaseDb: DbAdapter = {
     if (error || !data) return null;
     return { bytes: new Uint8Array(await data.arrayBuffer()), contentType: data.type || "image/jpeg" };
   },
+
+  async putPublicFile(p, bytes, contentType) {
+    const { error } = await sb().storage.from(THUMBS).upload(p, new Blob([bytes as BlobPart], { type: contentType }), { upsert: true, contentType, cacheControl: "31536000" });
+    if (error) throw new Error(error.message);
+    return sb().storage.from(THUMBS).getPublicUrl(p).data.publicUrl;
+  },
+  async putPrivateFile(p, bytes, contentType) {
+    const { error } = await sb().storage.from(BUCKET).upload(p, new Blob([bytes as BlobPart], { type: contentType }), { upsert: true, contentType });
+    if (error) throw new Error(error.message);
+  },
+  async privateFileUrl(p, ttl) {
+    const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(p, ttl);
+    if (error || !data) throw new Error(error?.message || "Could not sign the file URL.");
+    return data.signedUrl;
+  },
+  async getFile() {
+    return null;
+  },
 };

@@ -24,6 +24,9 @@ const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
 const SNAP_DIR = path.join(DIR, "snapshots");
 const THUMB_DIR = path.join(DIR, "thumbnails");
+const FILES_DIR = path.join(DIR, "files");
+const safeFile = (p: string) => p.split("/").map((seg) => seg.replace(/[^a-z0-9_.-]/gi, "_")).join("/");
+const typeOf = (p: string) => (p.endsWith(".png") ? "image/png" : p.endsWith(".webp") ? "image/webp" : p.endsWith(".gif") ? "image/gif" : p.endsWith(".zip") ? "application/zip" : "image/jpeg");
 
 let cache: Store | null = null;
 let writing: Promise<void> = Promise.resolve();
@@ -296,6 +299,29 @@ const impl: DbAdapter = {
     try {
       const bytes = await fs.readFile(path.join(THUMB_DIR, reviewId.replace(/[^a-z0-9_-]/gi, "_") + ".jpg"));
       return { bytes: new Uint8Array(bytes), contentType: "image/jpeg" };
+    } catch {
+      return null;
+    }
+  },
+
+  async putPublicFile(p, bytes) {
+    const full = path.join(FILES_DIR, "public", safeFile(p));
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    await fs.writeFile(full, bytes);
+    return `/api/files/public/${safeFile(p)}`;
+  },
+  async putPrivateFile(p, bytes) {
+    const full = path.join(FILES_DIR, "private", safeFile(p));
+    await fs.mkdir(path.dirname(full), { recursive: true });
+    await fs.writeFile(full, bytes);
+  },
+  async privateFileUrl(p) {
+    return `/api/files/private/${safeFile(p)}`;
+  },
+  async getFile(kind, p) {
+    try {
+      const bytes = await fs.readFile(path.join(FILES_DIR, kind, safeFile(p)));
+      return { bytes: new Uint8Array(bytes), contentType: typeOf(p) };
     } catch {
       return null;
     }

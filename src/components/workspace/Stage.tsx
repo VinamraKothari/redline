@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ExternalLink, Minimize2, MessageCircle, MessageCircleOff } from "lucide-react";
+import { ArrowLeft, ExternalLink, Minimize2, MessageCircle, MessageCircleOff, MousePointerClick } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
@@ -42,6 +42,7 @@ export function Stage() {
   const navigatedAway = useStore((s) => s.navigatedAway);
   const showComments = useStore((s) => s.showComments);
   const scripts = useStore((s) => s.scripts);
+  const hoverLocked = useStore((s) => s.hoverLocked);
   const set = useStore((s) => s.set);
 
   const stageRef = useRef<HTMLDivElement>(null);
@@ -66,9 +67,14 @@ export function Stage() {
   const bezel = kind === "mobile" && !fullscreen ? 14 : 0;
   const pad = fullscreen ? 0 : 28;
 
-  const fit = canvas.w ? Math.min(1, (canvas.w - pad * 2 - bezel * 2) / viewport) : 1;
+  // Fit math must never produce content taller/wider than the canvas: a
+  // rounding overshoot shows a scrollbar, which shrinks the canvas, which
+  // changes the fit, which hides the scrollbar again — a visible "shake" on
+  // platforms whose scrollbars take up space. Floor everything and keep a
+  // couple of pixels in hand.
+  const fit = canvas.w ? Math.min(1, Math.floor(((canvas.w - pad * 2 - bezel * 2 - 2) / viewport) * 10000) / 10000) : 1;
   const zoom = fitZoom ? fit : zoomStore;
-  const stageH = Math.max(240, Math.round((canvas.h - pad * 2 - bezel * 2) / zoom));
+  const stageH = Math.max(240, Math.floor((canvas.h - pad * 2 - bezel * 2 - 2) / zoom));
 
   useEffect(() => {
     if (fitZoom && Math.abs(zoomStore - fit) > 0.0001) set({ zoom: fit });
@@ -211,7 +217,7 @@ export function Stage() {
   return (
     <div
       ref={canvasRef}
-      className={cn("relative flex min-w-0 flex-1 items-start justify-center overflow-auto", fullscreen ? "bg-canvas" : "canvas-grid")}
+      className={cn("relative flex min-w-0 flex-1 items-start justify-center", fitZoom ? "overflow-hidden" : "overflow-auto", fullscreen ? "bg-canvas" : "canvas-grid")}
       style={{ padding: pad }}
       onWheelCapture={onWheel}
       onPointerMove={onStagePointerMove}
@@ -270,8 +276,17 @@ export function Stage() {
       </div>
 
       {/* banners (stacked so they never overlap) */}
-      {(navigatedAway || frameError) && (
+      {(navigatedAway || frameError || hoverLocked) && (
         <div className="fixed left-1/2 top-16 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
+          {hoverLocked && (
+            <div className="flex items-center gap-2 rounded-full bg-ink px-3 py-1.5 text-[12.5px] text-white shadow-pop fade-up">
+              <MousePointerClick size={13} className="text-red" />
+              Hover state locked — menus and tooltips stay open. Comment or inspect them, then press <span className="kbd !py-0.5">H</span> to release.
+              <button type="button" onClick={() => frame().lockHover(false)} className="rounded-full bg-white/15 px-2 py-0.5 text-[11.5px] hover:bg-white/25">
+                Release
+              </button>
+            </div>
+          )}
           {navigatedAway && (
             <div className="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-[12.5px] text-white shadow-pop fade-up">
               <span className="max-w-[320px] truncate">

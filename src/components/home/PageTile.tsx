@@ -74,7 +74,7 @@ export function PageTile({
         <div className="relative aspect-[16/10] w-full overflow-hidden bg-hover">
           {r.thumbnail_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={r.thumbnail_url} alt="" className={cn("h-full w-full object-cover object-top", refreshing && "opacity-40")} loading="lazy" />
+            <img src={r.thumbnail_url} alt="" className={cn("h-full w-full object-cover object-top", refreshing && "opacity-40")} />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-ink-3">
               <Globe size={18} />
