@@ -123,11 +123,32 @@ export async function renderFull(input: RenderInput): Promise<FullRender> {
     // element left in its hidden state: show it (there is no script to do so)
     await page
       .evaluate(() => {
-        document.querySelectorAll<HTMLElement>('[style*="opacity"]').forEach((el) => {
+        // same heuristic as revealHidden() in frame/dom.ts (older snapshots may predate it)
+        const reveal = (el: HTMLElement) => {
           const st = el.style;
-          if (parseFloat(st.opacity) === 0 && /translate|scale|matrix/.test(st.transform || "")) {
-            st.opacity = "1";
-            st.transform = "none";
+          if (parseFloat(st.opacity) !== 0) return false;
+          if (el.getAttribute("aria-hidden") === "true" || el.hasAttribute("inert") || el.hasAttribute("hidden")) return false;
+          if (/dialog|menu|listbox|tooltip/.test(el.getAttribute("role") || "")) return false;
+          if (/drawer|modal|overlay|sidebar|dropdown|popover|toast|backdrop|offcanvas|flyout|sheet/i.test(String(el.className) + " " + el.id)) return false;
+          const t = (st.transform || "").trim();
+          if (!t || t === "none") return true;
+          const num = (v: string) => Math.abs(parseFloat(v) || 0);
+          let m = t.match(/^translateY\((-?[\d.]+)(px|%)?\)$/);
+          if (m) return num(m[1]) <= (m[2] === "%" ? 40 : 200);
+          m = t.match(/^translate\((-?[\d.]+)(?:px)?,\s*(-?[\d.]+)(px|%)?\)$/);
+          if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+          m = t.match(/^translate3d\((-?[\d.]+)(?:px)?,\s*(-?[\d.]+)(?:px)?,\s*[-\d.]+(?:px)?\)$/);
+          if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+          m = t.match(/^scale\(([\d.]+)\)$/);
+          if (m) return parseFloat(m[1]) >= 0.8 && parseFloat(m[1]) <= 1.2;
+          m = t.match(/^matrix\(1,\s*0,\s*0,\s*1,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/);
+          if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+          return false;
+        };
+        document.querySelectorAll<HTMLElement>('[style*="opacity"]').forEach((el) => {
+          if (reveal(el)) {
+            el.style.opacity = "1";
+            el.style.transform = "none";
           }
         });
         document.querySelectorAll("[data-aos]").forEach((el) => el.classList.add("aos-animate"));

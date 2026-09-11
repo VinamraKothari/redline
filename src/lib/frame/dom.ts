@@ -519,16 +519,39 @@ export function summarize(doc: Document, limit = 4000): DesignSummary {
  */
 export function revealHidden(root: Element): void {
   root.querySelectorAll<HTMLElement>('[style*="opacity"]').forEach((el) => {
-    const st = el.style;
-    if (parseFloat(st.opacity) === 0 && /translate|scale|matrix/.test(st.transform || "")) {
-      st.opacity = "1";
-      st.transform = "none";
+    if (looksLikeScrollReveal(el)) {
+      el.style.opacity = "1";
+      el.style.transform = "none";
     }
   });
   root.querySelectorAll("[data-aos]").forEach((el) => el.classList.add("aos-animate"));
-  root.querySelectorAll<HTMLElement>(".reveal:not(.active), .fade-in:not(.visible), .wow:not(.animated)").forEach((el) => {
-    el.classList.add("active", "visible", "animated");
-  });
+}
+
+/**
+ * Framer-Motion-style reveal: inline `opacity: 0` plus a small vertical slide
+ * or a near-1 scale — never a closed drawer/dialog (large or horizontal
+ * offsets, overlay roles, aria-hidden).
+ */
+export function looksLikeScrollReveal(el: HTMLElement): boolean {
+  const st = el.style;
+  if (parseFloat(st.opacity) !== 0) return false;
+  if (el.getAttribute("aria-hidden") === "true" || el.hasAttribute("inert") || el.hasAttribute("hidden")) return false;
+  if (/dialog|menu|listbox|tooltip/.test(el.getAttribute("role") || "")) return false;
+  if (/drawer|modal|overlay|sidebar|dropdown|popover|toast|backdrop|offcanvas|flyout|sheet/i.test(String(el.className) + " " + el.id)) return false;
+  const t = (st.transform || "").trim();
+  if (!t || t === "none") return true;
+  const num = (v: string) => Math.abs(parseFloat(v) || 0);
+  let m = t.match(/^translateY\((-?[\d.]+)(px|%)?\)$/);
+  if (m) return num(m[1]) <= (m[2] === "%" ? 40 : 200);
+  m = t.match(/^translate\((-?[\d.]+)(?:px)?,\s*(-?[\d.]+)(px|%)?\)$/);
+  if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+  m = t.match(/^translate3d\((-?[\d.]+)(?:px)?,\s*(-?[\d.]+)(?:px)?,\s*[-\d.]+(?:px)?\)$/);
+  if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+  m = t.match(/^scale\(([\d.]+)\)$/);
+  if (m) return parseFloat(m[1]) >= 0.8 && parseFloat(m[1]) <= 1.2;
+  m = t.match(/^matrix\(1,\s*0,\s*0,\s*1,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/);
+  if (m) return num(m[1]) <= 20 && num(m[2]) <= 200;
+  return false;
 }
 
 export function serializeDocument(doc: Document): string {
