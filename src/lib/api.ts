@@ -140,6 +140,9 @@ export const api = {
   editComment(id: string, body: string) {
     return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "edit", body }) });
   },
+  setViewports(id: string, viewports: { min: number; max: number } | null) {
+    return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "viewports", viewports }) });
+  },
   retitleComment(id: string, title: string) {
     return call<{ comment: Comment }>(`/api/comments/${id}`, { method: "PATCH", body: JSON.stringify({ action: "title", title }) });
   },

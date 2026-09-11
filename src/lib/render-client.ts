@@ -1,6 +1,7 @@
 "use client";
 
 import { frame } from "./frame/controller";
+import { showsAt } from "./viewports";
 import { serializeDocument } from "./frame/dom";
 import { threadOrder } from "./export";
 import { useStore } from "./store";
@@ -26,7 +27,7 @@ export function currentPins(comments: Comment[], viewport: number): Pin[] {
   const roots = threadOrder(comments);
   const pins: Pin[] = [];
   roots.forEach((c, i) => {
-    if (c.viewport_width !== viewport || !c.anchor) return;
+    if (!showsAt(c, viewport) || !c.anchor) return;
     const pos = frame().resolveAnchor(c.anchor);
     pins.push({ id: c.id, n: i + 1, x: pos.x, y: pos.y, color: c.resolved ? "#1f9d55" : c.author_color, region: c.anchor.region ?? null });
   });

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { sanitizeViewports } from "@/lib/viewports";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
 import type { Anchor, Comment } from "@/lib/types";
 
@@ -20,7 +21,8 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/co
   const may = mine || role === "admin";
 
   const body = (await req.json().catch(() => ({}))) as {
-    action: "edit" | "resolve" | "react" | "move" | "title";
+    action: "edit" | "resolve" | "react" | "move" | "title" | "viewports";
+    viewports?: { min: number; max: number } | null;
     body?: string;
     title?: string;
     resolved?: boolean;
@@ -65,7 +67,14 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/co
     case "move": {
       if (c.parent_id || !body.anchor) throw new HttpError(400, "bad request");
       if (!may) throw new HttpError(403, "You can only move your own pins.");
-      patch.anchor = body.anchor;
+      // moving a pin keeps the viewport band it applies to
+      patch.anchor = { ...body.anchor, viewports: body.anchor.viewports === undefined ? (c.anchor?.viewports ?? null) : sanitizeViewports(body.anchor.viewports) };
+      break;
+    }
+    case "viewports": {
+      if (c.parent_id || !c.anchor) throw new HttpError(400, "bad request");
+      if (!may) throw new HttpError(403, "You can only change your own threads.");
+      patch.anchor = { ...c.anchor, viewports: sanitizeViewports(body.viewports) };
       break;
     }
     default:

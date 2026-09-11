@@ -398,12 +398,15 @@ test("save state as a new page: a locked hover menu stays open for everyone on t
   await page.mouse.move(t.x, t.y);
   await expect(frame.locator("#css-panel")).toBeVisible();
   await page.keyboard.press("h");
+  await expect(page.getByText(/Hover state locked/)).toBeVisible();
   await page.mouse.move(20, 20);
+  await expect(frame.locator("#css-panel")).toBeVisible();
+  const sourceUrl = page.url();
   await page.keyboard.press("Shift+P");
   await expect(page.getByText("Save this state as a new page")).toBeVisible();
   await page.getByLabel("State page name").fill("Hover fixture — menu open");
   await page.getByRole("button", { name: /Save as new page/ }).click();
-  await page.waitForURL(/\/r\/[a-z0-9]+/);
+  await page.waitForURL((u) => /\/r\/[a-z0-9]+/.test(u.toString()) && u.toString() !== sourceUrl);
   const frozen = page.frameLocator('iframe[title="Page under review"]');
   await expect(frozen.locator("#css-panel")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Frozen", { exact: true })).toBeVisible();
@@ -543,4 +546,46 @@ test("read / unread: another member's reply flags the thread, U toggles, mark al
   await expect.poll(async () => ((await (await page.request.get(`/api/reviews/${reviewId}/reads`)).json()).reads[root.id] as string | undefined) ?? "", { timeout: 8000 }).not.toMatch(/^!/);
   await otherCtx.close();
   await editorCtx.close();
+});
+
+test("viewport range: a thread can apply to several viewports and follows its element there", async ({ page }) => {
+  const frame = await createReview(page);
+  const pt = await pointIn(page, '[data-testid="headline"]', 0.1, 0.5);
+  await page.mouse.click(pt.x, pt.y);
+  // widen the new thread to tablet as well (desktop is preselected)
+  await page.getByRole("group", { name: "Applies to viewports" }).getByRole("button", { name: "Tablet" }).click();
+  await page.getByPlaceholder(/Leave a comment/).fill("Headline wraps badly on tablet too.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("aside").getByText("Headline wraps badly")).toBeVisible();
+  await expect(page.locator("aside").getByText("Desktop + Tablet")).toBeVisible();
+
+  // on a tablet viewport the pin is still there, anchored to the headline
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-pin]:not([data-pin='draft'])")).toHaveCount(1);
+  await page.keyboard.press("2");
+  await expect(page.getByText("1024").first()).toBeVisible();
+  await settle(page);
+  await expect(frame.locator("h1")).toHaveText("Ship better design reviews");
+  await expect(page.locator("[data-pin]:not([data-pin='draft'])")).toHaveCount(1);
+  // the panel does not force the viewport back to 1440 when opening it
+  await page.locator("aside").getByText("Headline wraps badly").click();
+  await expect(page.getByText("Headline wraps badly on tablet too.").last()).toBeVisible();
+  await expect(page.getByText("1024").first()).toBeVisible();
+
+  // narrow it back to just the original viewport from the thread header: it leaves the tablet canvas
+  await page.getByRole("button", { name: "Viewports this thread applies to" }).click();
+  await page.getByRole("menuitem", { name: /Only 1440px/ }).click();
+  await expect(page.locator("aside").getByText("Desktop + Tablet")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-pin]:not([data-pin='draft'])")).toHaveCount(0);
+  await page.locator("aside").getByText("Headline wraps badly").click();
+
+  // …and widen to every size; the CSV spells it out
+  await page.getByRole("button", { name: "Viewports this thread applies to" }).click();
+  await page.getByRole("menuitem", { name: "All viewports" }).click();
+  await expect(page.locator("aside").getByText("All viewports")).toBeVisible();
+  const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
+  const csv = await (await page.request.get(`/api/reviews/${id}/export?format=jira`)).text();
+  expect(csv).toContain("viewport-desktop-tablet-phone");
+  expect(csv).toContain("all viewports (written at 1440px)");
 });

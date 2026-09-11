@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { isUnread, useStore, threadRoots, repliesOf } from "@/lib/store";
+import { showsAt } from "@/lib/viewports";
 import { frame } from "@/lib/frame/controller";
 import { api } from "@/lib/api";
 import type { Comment } from "@/lib/types";
@@ -49,6 +50,7 @@ function Pin({
       type="button"
       onPointerDown={onPointerDown}
       onClick={onClick}
+      data-pin={draft ? "draft" : label}
       className={cn(
         "pointer-events-auto absolute flex h-8 w-8 origin-bottom-left -translate-y-full items-center justify-center rounded-[50%_50%_50%_0] text-[11px] font-bold text-white shadow-pin transition-transform",
         "outline outline-2 outline-white",
@@ -89,7 +91,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   const placed: Placed[] = useMemo(() => {
     void layoutTick; // re-place pins whenever the page layout changes
-    const roots = threadRoots(comments).filter((c) => c.viewport_width === viewport && (showResolved || !c.resolved || c.id === activeThread));
+    const roots = threadRoots(comments).filter((c) => showsAt(c, viewport) && (showResolved || !c.resolved || c.id === activeThread));
     return roots
       .map((c) => {
         if (!c.anchor) return null;
@@ -110,7 +112,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
     const p = placed.find((x) => x.c.id === activeThread);
     if (!p) {
       const c = comments.find((x) => x.id === activeThread);
-      if (c && c.viewport_width !== viewport) set({ viewport: c.viewport_width, fitZoom: true });
+      if (c && !showsAt(c, viewport)) set({ viewport: c.viewport_width, fitZoom: true });
       return;
     }
     const win = frame().win;
@@ -122,7 +124,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   const inv = 1 / geom.zoom;
 
-  async function submitDraft(body: string, attachments: Comment["attachments"], title: string) {
+  async function submitDraft(body: string, attachments: Comment["attachments"], title: string, viewports?: { min: number; max: number } | null) {
     if (!draft || !review) return;
     try {
       const { comment } = await api.createComment(review.id, {
@@ -138,6 +140,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
           py: draft.py,
           region: draft.region,
           element_label: draft.element_label,
+          viewports: viewports ?? null,
         },
       });
       upsert(comment);

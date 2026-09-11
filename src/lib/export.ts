@@ -1,4 +1,5 @@
 import type { Comment } from "./types";
+import { KIND_LABEL, kindsInRange, viewportExportLabel, viewportRange } from "./viewports";
 import type { PublicReview } from "./review";
 
 /* ─── shared ─────────────────────────────────────────────────────────────── */
@@ -116,7 +117,7 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       "",
       `*Page:* ${review.url}`,
       root.anchor?.element_label ? `*Element:* {{${root.anchor.element_label}}}` : null,
-      `*Viewport:* ${root.viewport_width}px`,
+      `*Viewport:* ${viewportExportLabel(root)}`,
       root.anchor?.region ? `*Region:* ${Math.round(root.anchor.region.w)}×${Math.round(root.anchor.region.h)}px` : null,
       `*Open in Redline:* ${link}`,
       screenshots[root.id] ? `*Screenshot:* ${screenshots[root.id]}` : null,
@@ -131,7 +132,7 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       "Medium",
       root.resolved ? "Done" : "To Do",
       "redline",
-      `viewport-${root.viewport_width}`,
+      viewportRange(root) ? `viewport-${kindsInRange(viewportRange(root)!).map((k) => KIND_LABEL[k].toLowerCase()).join("-")}` : `viewport-${root.viewport_width}`,
       root.author_name,
       jiraDate(root.created_at),
       ...Array.from({ length: maxReplies }, (_, k) => {
@@ -141,7 +142,7 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       ...Array.from({ length: maxAttachments }, (_, k) => atts[k] || ""),
       link,
       root.anchor?.element_label || "",
-      String(root.viewport_width),
+      viewportExportLabel(root),
       review.url,
     ];
     return cells.map(csvCell).join(",");
@@ -162,7 +163,7 @@ export function toMarkdown(review: PublicReview, comments: Comment[], origin: st
       out.push(`### ${i + 1}. ${root.title || plain(root.body).split("\n")[0].slice(0, 90) || "Image comment"}`);
       out.push(`- **By:** ${root.author_name} · ${new Date(root.created_at).toLocaleString()}`);
       if (root.anchor?.element_label) out.push(`- **Element:** \`${root.anchor.element_label}\``);
-      out.push(`- **Viewport:** ${root.viewport_width}px`);
+      out.push(`- **Viewport:** ${viewportExportLabel(root)}`);
       out.push(`- **Link:** ${origin}/r/${review.id}?c=${root.id}`);
       out.push("");
       out.push(plain(root.body));

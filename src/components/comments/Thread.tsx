@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Link2, MoreHorizontal, Pencil, RotateCcw, SmilePlus, Trash2, Unlink, Mail, MailOpen } from "lucide-react";
-import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/primitives";
+import { Avatar, IconButton, Menu, MenuCheckboxItem, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { repliesOf, useStore } from "@/lib/store";
 import type { Attachment, Comment } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/util";
+import { KIND_LABEL, KIND_ORDER, kindOf, kindsInRange, rangeForKinds, viewportLabel, viewportRange, type ViewportKind } from "@/lib/viewports";
 import { CommentBody } from "./CommentBody";
 import { Composer, EMOJIS } from "./Composer";
 
@@ -252,7 +253,7 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
             <Unlink size={11} /> not attached to an element
           </span>
         )}
-        <span className="mono text-[10.5px] text-ink-3">· {root.viewport_width}</span>
+        <ViewportsMenu root={root} editable={canRetitle} />
         <div className="flex-1" />
         <Tip label={flaggedUnread ? "Mark as read" : "Mark as unread (U)"} side="bottom">
           <IconButton
@@ -314,6 +315,77 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Which viewports the thread belongs on: just the one it was written at, or a
+ * band such as "Tablet + Phone" / every size. Author or admin can change it.
+ */
+function ViewportsMenu({ root, editable }: { root: Comment; editable: boolean }) {
+  const upsert = useStore((s) => s.upsertComment);
+  const toast = useStore((s) => s.toast);
+  const range = viewportRange(root);
+  const kinds = range ? kindsInRange(range) : [kindOf(root.viewport_width)];
+  const label = viewportLabel(root);
+
+  async function apply(next: ViewportKind[]) {
+    const own = kindOf(root.viewport_width);
+    const viewports = next.length === 1 && next[0] === own ? null : rangeForKinds(next.length ? next : [own]);
+    try {
+      const { comment } = await api.setViewports(root.id, viewports);
+      upsert(comment);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  }
+
+  if (!editable) {
+    return (
+      <span className="mono shrink-0 whitespace-nowrap text-[10.5px] text-ink-3" title={range ? `Shown on ${label.toLowerCase()} (written at ${root.viewport_width}px)` : "Viewport this thread belongs to"}>
+        · {label}
+      </span>
+    );
+  }
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Viewports this thread applies to"
+          title="Which viewports this thread is shown on"
+          className="press mono shrink-0 whitespace-nowrap rounded px-1 text-[10.5px] text-ink-3 hover:bg-hover hover:text-ink"
+        >
+          · {label}
+        </button>
+      </MenuTrigger>
+      <MenuContent align="end">
+        <MenuLabel>Show this thread on</MenuLabel>
+        {KIND_ORDER.map((k) => (
+          <MenuCheckboxItem
+            key={k}
+            checked={kinds.includes(k)}
+            onSelect={(e) => e.preventDefault()}
+            onCheckedChange={(on) => apply(on ? [...kinds, k] : kinds.filter((x) => x !== k))}
+            className="flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-hover"
+          >
+            <span className="w-3 text-blue">{kinds.includes(k) ? "•" : ""}</span>
+            {KIND_LABEL[k]}
+            {k === kindOf(root.viewport_width) && <span className="ml-auto text-[10.5px] text-ink-3">written at {root.viewport_width}</span>}
+          </MenuCheckboxItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem onSelect={() => apply(KIND_ORDER)}>
+          <span className="w-3" />
+          All viewports
+        </MenuItem>
+        <MenuItem onSelect={() => apply([kindOf(root.viewport_width)])}>
+          <span className="w-3" />
+          Only {root.viewport_width}px
+        </MenuItem>
+        <p className="max-w-[220px] px-2 pb-1 pt-1.5 text-[10.5px] leading-snug text-ink-3">The pin follows its element on each size; sizes in between are included.</p>
+      </MenuContent>
+    </Menu>
   );
 }
 

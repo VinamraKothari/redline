@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { sanitizeViewports } from "@/lib/viewports";
 import { guarded, reviewAccess, syncProfile } from "@/lib/auth/server";
 import type { Comment } from "@/lib/types";
 import { newId } from "@/lib/util";
@@ -46,7 +47,7 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/rev
     author_color: profile.color,
     title: isReply ? null : title,
     body: text,
-    anchor: isReply ? null : body.anchor!,
+    anchor: isReply ? null : { ...body.anchor!, viewports: sanitizeViewports(body.anchor!.viewports) },
     viewport_width: Number(body.viewport_width) || review.default_viewport,
     resolved: false,
     reactions: {},

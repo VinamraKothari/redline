@@ -43,6 +43,7 @@ import { mentionsIn, plainText } from "@/components/comments/CommentBody";
 import type { Comment } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/util";
 import { toJiraCsv } from "@/lib/export";
+import { showsAt, viewportLabel } from "@/lib/viewports";
 
 function VpIcon({ w }: { w: number }) {
   const I = w >= 1200 ? Monitor : w >= 700 ? Tablet : Smartphone;
@@ -118,7 +119,7 @@ function Tile({
         </div>
         <div className="flex items-center gap-2 text-[10.5px] text-ink-3">
           <span className="mono inline-flex items-center gap-1">
-            <VpIcon w={c.viewport_width} /> {c.viewport_width}
+            <VpIcon w={c.viewport_width} /> {viewportLabel(c)}
           </span>
           {c.anchor?.element_label ? (
             <span className="mono truncate" title={c.anchor.element_label}>
@@ -194,7 +195,7 @@ export function CommentsPanel() {
 
   const threads = useMemo(() => {
     const roots = threadRoots(comments)
-      .filter((c) => !onlyViewport || c.viewport_width === viewport)
+      .filter((c) => !onlyViewport || showsAt(c, viewport))
       .map((c) => {
         const replies = repliesOf(comments, c.id);
         const all = [c, ...replies];
@@ -254,7 +255,7 @@ export function CommentsPanel() {
     set({
       activeThread: c.id,
       draft: null,
-      viewport: c.viewport_width,
+      viewport: showsAt(c, viewport) ? viewport : c.viewport_width,
       showResolved: c.resolved ? true : useStore.getState().showResolved,
     });
     if (c.anchor) {

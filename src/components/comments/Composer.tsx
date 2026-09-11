@@ -6,6 +6,7 @@ import { Avatar, IconButton, Popover, PopoverContent, PopoverTrigger } from "@/c
 import { useStore } from "@/lib/store";
 import type { Attachment } from "@/lib/types";
 import { cn, colorFor } from "@/lib/util";
+import { KIND_LABEL, KIND_ORDER, kindOf, rangeForKinds, type ViewportKind } from "@/lib/viewports";
 
 export const EMOJIS = ["👍", "👎", "❤️", "🔥", "👀", "✅", "❌", "🎉", "😂", "🤔", "💡", "⚠️", "🙏", "💯", "😍", "🚀", "🐛", "✨", "👏", "🤷"];
 
@@ -66,7 +67,7 @@ export function Composer({
 }: {
   placeholder?: string;
   autoFocus?: boolean;
-  onSubmit: (body: string, attachments: Attachment[], title: string) => Promise<void> | void;
+  onSubmit: (body: string, attachments: Attachment[], title: string, viewports: { min: number; max: number } | null) => Promise<void> | void;
   onCancel?: () => void;
   onDirty?: (dirty: boolean) => void;
   initial?: string;
@@ -78,7 +79,10 @@ export function Composer({
 }) {
   const viewer = useStore((s) => s.viewer);
   const viewers = useStore((s) => s.viewers);
+  const viewport = useStore((s) => s.viewport);
   const [text, setText] = useState(initial);
+  // which viewports a new thread applies to — the current one unless widened
+  const [kinds, setKinds] = useState<ViewportKind[]>(() => [kindOf(viewport)]);
   const [title, setTitle] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -159,12 +163,14 @@ export function Composer({
     if (!body && !attachments.length) return;
     // Clear right away so the box feels instant; put everything back if the send fails.
     const draft = { text, title, attachments };
+    // a range only when more than the current viewport's band was picked
+    const viewports = withTitle && !(kinds.length === 1 && kinds[0] === kindOf(viewport)) ? rangeForKinds(kinds) : null;
     setBusy(true);
     setText("");
     setTitle("");
     setAttachments([]);
     try {
-      await onSubmit(body, draft.attachments, draft.title.trim());
+      await onSubmit(body, draft.attachments, draft.title.trim(), viewports);
     } catch (e) {
       setText(draft.text);
       setTitle(draft.title);
@@ -264,6 +270,39 @@ export function Composer({
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+          {withTitle && (
+            <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5 pt-0.5" role="group" aria-label="Applies to viewports">
+              <span className="mr-0.5 text-[10.5px] text-ink-3">Applies to</span>
+              {KIND_ORDER.map((k) => {
+                const on = kinds.includes(k);
+                const current = k === kindOf(viewport);
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={on}
+                    title={current ? `${KIND_LABEL[k]} — the viewport you're on` : `Also show this thread on ${KIND_LABEL[k].toLowerCase()} sizes`}
+                    onClick={() => {
+                      setKinds((cur) => {
+                        const next = on ? cur.filter((x) => x !== k) : [...cur, k];
+                        return next.length ? next : [k];
+                      });
+                      setTimeout(() => ta.current?.focus(), 0);
+                    }}
+                    className={cn(
+                      "press h-5 rounded-full px-2 text-[10.5px] font-medium transition-colors",
+                      on ? "bg-ink text-white" : "bg-hover text-ink-2 hover:text-ink",
+                    )}
+                  >
+                    {KIND_LABEL[k]}
+                  </button>
+                );
+              })}
+              {kinds.includes("desktop") && kinds.includes("mobile") && !kinds.includes("tablet") && (
+                <span className="text-[10.5px] text-ink-3">· tablet sizes in between are included</span>
+              )}
             </div>
           )}
           <div className="flex items-center gap-0.5 px-1 pb-1">

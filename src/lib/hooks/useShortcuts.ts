@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useStore, threadRoots } from "@/lib/store";
+import { showsAt } from "@/lib/viewports";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
 
@@ -125,7 +126,7 @@ export function useShortcuts() {
           const next = e.shiftKey
             ? roots[(idx - 1 + roots.length) % roots.length]
             : roots[(idx + 1) % roots.length];
-          st.set({ activeThread: next.id, viewport: next.viewport_width });
+          st.set({ activeThread: next.id, viewport: showsAt(next, st.viewport) ? st.viewport : next.viewport_width });
           if (next.anchor) {
             const pos = frame().resolveAnchor(next.anchor);
             frame().scrollToPage(pos.y);

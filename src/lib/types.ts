@@ -80,6 +80,8 @@ export interface Anchor {
   region?: { x: number; y: number; w: number; h: number } | null;
   /** human readable element path, e.g. "main › section.hero › h1" */
   element_label?: string | null;
+  /** the thread applies to every viewport in this band (px, inclusive); absent = only `viewport_width` */
+  viewports?: { min: number; max: number } | null;
 }
 
 export interface Attachment {
