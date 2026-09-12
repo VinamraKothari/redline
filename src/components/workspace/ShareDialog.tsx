@@ -149,8 +149,8 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <p className="mt-3 text-[11.5px] leading-relaxed text-ink-3">
           The Jira CSV uses the columns Jira Cloud&apos;s importer maps by default (Summary, Description, Issue Type, Priority, Status, Labels,
           Reporter, Created, Comment, Attachment). A thread&apos;s title becomes its Summary. Each issue gets a screenshot of the page around its pin (marker
-          numbered like the CSV row) plus any images attached to the thread, as public URLs in the Attachment columns — Jira downloads them during
-          import. In Jira:{" "}
+          numbered like the CSV row) plus any images and screen recordings attached to the thread, as public URLs in the Attachment columns — Jira
+          downloads them during import; recordings are also linked in the description so they open in a browser tab with one click. In Jira:{" "}
           <span className="text-ink-2">Settings → System → External system import → CSV</span>. Extra columns (Redline URL, Element, Viewport) can
           be mapped to custom fields or skipped.
         </p>

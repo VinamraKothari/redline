@@ -46,7 +46,7 @@ export function bundle(comments: Comment[]): ThreadBundle[] {
 /** The Jira summary: the thread's title, or an auto-generated one from the first line. */
 export function jiraSummary(review: PublicReview, root: Comment): string {
   if (root.title) return root.title;
-  const firstLine = plain(root.body).split("\n")[0].trim() || (root.attachments?.length ? "Image comment" : "Comment");
+  const firstLine = plain(root.body).split("\n")[0].trim() || (root.attachments?.some((a) => a.kind === "video") ? "Screen recording" : root.attachments?.length ? "Image comment" : "Comment");
   return `[${review.title}] ${firstLine.length > 110 ? firstLine.slice(0, 107) + "…" : firstLine}`;
 }
 
@@ -61,11 +61,21 @@ export function attachmentUrl(origin: string, comment: Comment, att: Comment["at
  * from the URL while importing.
  */
 function jiraAttachment(origin: string, c: Comment, att: Comment["attachments"][number]): string {
+  if (att.kind === "video") {
+    const vext = /\.mp4(\?|$)/i.test(att.url) ? "mp4" : "webm";
+    const vbase = (att.name || "recording").replace(/[^\w.-]+/g, "-").replace(/\.[^.]+$/, "") || "recording";
+    return `${jiraDate(c.created_at)};${c.author_name};${vbase}.${vext};${absolute(origin, att.url)}`;
+  }
   const ext = att.url.startsWith("data:image/png") ? "png" : att.url.startsWith("data:image/webp") ? "webp" : /\.png(\?|$)/i.test(att.url) ? "png" : "jpg";
   const base = (att.name || "image").replace(/[^\w.-]+/g, "-").replace(/\.[^.]+$/, "") || "image";
   // files already in storage are public; inline (older) images are served by /api/attachments
-  const url = /^https?:\/\//i.test(att.url) ? att.url : attachmentUrl(origin, c, att);
+  const url = /^https?:\/\//i.test(att.url) ? att.url : att.url.startsWith("/") ? absolute(origin, att.url) : attachmentUrl(origin, c, att);
   return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${url}`;
+}
+
+/** Storage URLs are absolute in production; the local adapter serves relative ones. */
+function absolute(origin: string, url: string): string {
+  return url.startsWith("/") ? origin + url : url;
 }
 
 /** Order of threads in the CSV = numbering of the markers on the rendered screenshots. */
@@ -90,6 +100,8 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       ...[root, ...replies].flatMap((c) => (c.attachments || []).map((a) => jiraAttachment(origin, c, a))),
     ];
   };
+  const recordingsOf = ({ root, replies }: ThreadBundle) =>
+    [root, ...replies].flatMap((c) => (c.attachments || []).filter((a) => a.kind === "video" && /^(https?:\/\/|\/)/i.test(a.url)).map((a) => ({ c, a: { ...a, url: absolute(origin, a.url) } })));
   const maxAttachments = Math.max(0, ...threads.map((t) => attachmentsOf(t).length));
   const header = [
     "Summary",
@@ -121,7 +133,8 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
       root.anchor?.region ? `*Region:* ${Math.round(root.anchor.region.w)}×${Math.round(root.anchor.region.h)}px` : null,
       `*Open in Redline:* ${link}`,
       screenshots[root.id] ? `*Screenshot:* ${screenshots[root.id]}` : null,
-      atts.length ? `*Attachments:* ${atts.length} image(s), attached to this issue` : null,
+      ...recordingsOf(t).map(({ c, a }, i) => `*Recording ${i + 1}:* [${a.duration ? `${Math.floor(a.duration / 60)}:${String(a.duration % 60).padStart(2, "0")} by ${c.author_name}` : c.author_name}|${a.url}] — opens in the browser`),
+      atts.length ? `*Attachments:* ${atts.length} file(s) attached to this issue` : null,
     ]
       .filter((x) => x !== null)
       .join("\n");
@@ -167,7 +180,10 @@ export function toMarkdown(review: PublicReview, comments: Comment[], origin: st
       out.push(`- **Link:** ${origin}/r/${review.id}?c=${root.id}`);
       out.push("");
       out.push(plain(root.body));
-      if (root.attachments?.length) out.push(`\n_${root.attachments.length} image attachment(s)_`);
+      const vids = [root, ...replies].flatMap((c) => (c.attachments || []).filter((a) => a.kind === "video"));
+      const imgs = root.attachments?.filter((a) => a.kind !== "video") ?? [];
+      if (imgs.length) out.push(`\n_${imgs.length} image attachment(s)_`);
+      vids.forEach((a, k) => out.push(`- **Recording ${k + 1}:** ${absolute(origin, a.url)}`));
       if (replies.length) {
         out.push("");
         replies.forEach((r) => out.push(`> **${r.author_name}** (${new Date(r.created_at).toLocaleString()}): ${plain(r.body).replace(/\n/g, "\n> ")}`));

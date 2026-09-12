@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImagePlus, SendHorizontal, Smile, X } from "lucide-react";
+import { Film, ImagePlus, SendHorizontal, Smile, Video, X } from "lucide-react";
 import { Avatar, IconButton, Popover, PopoverContent, PopoverTrigger } from "@/components/ui/primitives";
 import { useStore } from "@/lib/store";
 import type { Attachment } from "@/lib/types";
 import { cn, colorFor } from "@/lib/util";
 import { KIND_LABEL, KIND_ORDER, kindOf, rangeForKinds, type ViewportKind } from "@/lib/viewports";
+import { canRecord, clock, startRecording } from "@/lib/recorder";
 
 export const EMOJIS = ["👍", "👎", "❤️", "🔥", "👀", "✅", "❌", "🎉", "😂", "🤔", "💡", "⚠️", "🙏", "💯", "😍", "🚀", "🐛", "✨", "👏", "🤷"];
 
@@ -64,6 +65,7 @@ export function Composer({
   compact,
   participants = [],
   withTitle,
+  recordTarget,
 }: {
   placeholder?: string;
   autoFocus?: boolean;
@@ -76,10 +78,15 @@ export function Composer({
   participants?: string[];
   /** new threads: an optional title that becomes the Jira summary */
   withTitle?: boolean;
+  /** enables "Record screen"; a finished clip lands here ("draft" or the thread id) */
+  recordTarget?: string;
 }) {
   const viewer = useStore((s) => s.viewer);
   const viewers = useStore((s) => s.viewers);
   const viewport = useStore((s) => s.viewport);
+  const recording = useStore((s) => (recordTarget && s.recording?.target === recordTarget ? s.recording : null));
+  const uploading = useStore((s) => (recordTarget && s.uploading?.target === recordTarget ? s.uploading : null));
+  const pendingRecording = useStore((s) => (recordTarget && s.pendingRecording?.target === recordTarget ? s.pendingRecording : null));
   const [text, setText] = useState(initial);
   // which viewports a new thread applies to — the current one unless widened
   const [kinds, setKinds] = useState<ViewportKind[]>(() => [kindOf(viewport)]);
@@ -99,6 +106,14 @@ export function Composer({
   useEffect(() => {
     if (autoFocus) setTimeout(() => ta.current?.focus(), 30);
   }, [autoFocus]);
+
+  // a finished screen recording arrives as an attachment
+  useEffect(() => {
+    if (!pendingRecording) return;
+    setAttachments((cur) => [...cur, pendingRecording.attachment].slice(0, 6));
+    useStore.setState({ pendingRecording: null });
+    setTimeout(() => ta.current?.focus(), 30);
+  }, [pendingRecording]);
 
   // autosize
   useEffect(() => {
@@ -259,8 +274,21 @@ export function Composer({
             <div className="flex flex-wrap gap-1.5 px-2 pb-1">
               {attachments.map((a) => (
                 <div key={a.id} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={a.url} alt={a.name} className="h-14 w-14 rounded-md object-cover hairline" />
+                  {a.kind === "video" ? (
+                    <div className="flex h-14 items-center gap-2 rounded-md bg-ink px-2.5 text-white hairline" title={a.name}>
+                      <Film size={14} className="text-red" />
+                      <div className="leading-tight">
+                        <div className="text-[11.5px] font-medium">Recording</div>
+                        <div className="num text-[10.5px] text-white/70">
+                          {clock(a.duration ?? 0)}
+                          {a.size ? ` · ${(a.size / 1_048_576).toFixed(1)} MB` : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={a.url} alt={a.name} className="h-14 w-14 rounded-md object-cover hairline" />
+                  )}
                   <button
                     type="button"
                     onClick={() => setAttachments((cur) => cur.filter((x) => x.id !== a.id))}
@@ -323,6 +351,26 @@ export function Composer({
             <IconButton size="sm" title="Attach image" onClick={() => fileRef.current?.click()}>
               <ImagePlus size={14} />
             </IconButton>
+            {recordTarget && canRecord() && (
+              <IconButton
+                size="sm"
+                title={recording ? "Recording…" : "Record the screen (an animation, a hover, a flow) and attach the clip"}
+                aria-label="Record screen"
+                disabled={Boolean(recording || uploading)}
+                onClick={() => startRecording(recordTarget)}
+                className={recording ? "!text-red" : ""}
+              >
+                <Video size={14} />
+              </IconButton>
+            )}
+            {uploading && (
+              <span className="num ml-1 flex items-center gap-1.5 text-[11px] text-ink-2" aria-live="polite">
+                <span className="h-1 w-16 overflow-hidden rounded-full bg-hover">
+                  <span className="block h-full bg-red transition-[width]" style={{ width: `${Math.round(uploading.progress * 100)}%` }} />
+                </span>
+                Uploading clip…
+              </span>
+            )}
             <input
               ref={fileRef}
               type="file"
@@ -331,7 +379,7 @@ export function Composer({
               className="hidden"
               onChange={(e) => e.target.files && addFiles(e.target.files)}
             />
-            <span className="ml-1 hidden text-[11px] text-ink-3 sm:inline">@ to mention</span>
+            {!uploading && <span className="ml-1 hidden text-[11px] text-ink-3 sm:inline">@ to mention</span>}
             <div className="flex-1" />
             {onCancel && (
               <button type="button" onClick={onCancel} className="rounded px-2 py-1 text-[12px] text-ink-2 hover:bg-hover">

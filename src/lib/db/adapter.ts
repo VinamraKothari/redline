@@ -66,6 +66,12 @@ export interface DbAdapter {
    * through a short-lived signed URL.
    */
   putPublicFile(path: string, bytes: Uint8Array, contentType: string): Promise<string>;
+  /**
+   * Where the browser can PUT a large public file itself (recordings are
+   * bigger than a serverless request body may be). Returns the upload target
+   * and the URL the file will have once it is there.
+   */
+  createPublicUpload(path: string, contentType: string): Promise<{ uploadUrl: string; headers: Record<string, string>; url: string }>;
   putPrivateFile(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
   privateFileUrl(path: string, ttlSeconds: number): Promise<string>;
   /** local adapter only: read a stored file back (served by /api/files) */

@@ -8,6 +8,7 @@ import { repliesOf, useStore } from "@/lib/store";
 import type { Attachment, Comment } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/util";
 import { KIND_LABEL, KIND_ORDER, kindOf, kindsInRange, rangeForKinds, viewportLabel, viewportRange, type ViewportKind } from "@/lib/viewports";
+import { clock } from "@/lib/recorder";
 import { CommentBody } from "./CommentBody";
 import { Composer, EMOJIS } from "./Composer";
 
@@ -177,16 +178,35 @@ function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean;
             {c.body && <CommentBody text={c.body} me={viewer.name} className="text-[13px] leading-[1.5] text-ink break-words" />}
             {c.attachments?.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {c.attachments.map((a) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={a.id}
-                    src={a.url}
-                    alt={a.name}
-                    onClick={() => setLightbox(a)}
-                    className="h-20 max-w-[160px] cursor-zoom-in rounded-md object-cover hairline"
-                  />
-                ))}
+                {c.attachments.map((a) =>
+                  a.kind === "video" ? (
+                    <div key={a.id} className="w-full">
+                      <video
+                        src={a.url}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="max-h-[220px] w-full rounded-md bg-ink hairline"
+                        aria-label={`Screen recording, ${clock(a.duration ?? 0)}`}
+                      />
+                      <div className="mt-0.5 flex items-center gap-2 text-[10.5px] text-ink-3">
+                        <span className="num">Recording · {clock(a.duration ?? 0)}</span>
+                        <a href={a.url} target="_blank" rel="noreferrer" className="underline decoration-ink-3/50 underline-offset-2 hover:text-ink">
+                          Open in a new tab
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={a.id}
+                      src={a.url}
+                      alt={a.name}
+                      onClick={() => setLightbox(a)}
+                      className="h-20 max-w-[160px] cursor-zoom-in rounded-md object-cover hairline"
+                    />
+                  ),
+                )}
               </div>
             )}
             <Reactions c={c} />
@@ -302,6 +322,7 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
         <Composer
           compact
           placeholder="Reply…"
+          recordTarget={root.id}
           participants={participants}
           onSubmit={async (body, attachments) => {
             const { comment } = await api.createComment(review.id, {

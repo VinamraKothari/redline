@@ -27,7 +27,7 @@ const SNAP_DIR = path.join(DIR, "snapshots");
 const THUMB_DIR = path.join(DIR, "thumbnails");
 const FILES_DIR = path.join(DIR, "files");
 const safeFile = (p: string) => p.split("/").map((seg) => seg.replace(/[^a-z0-9_.-]/gi, "_")).join("/");
-const typeOf = (p: string) => (p.endsWith(".png") ? "image/png" : p.endsWith(".webp") ? "image/webp" : p.endsWith(".gif") ? "image/gif" : p.endsWith(".zip") ? "application/zip" : "image/jpeg");
+const typeOf = (p: string) => (p.endsWith(".png") ? "image/png" : p.endsWith(".webp") ? "image/webp" : p.endsWith(".gif") ? "image/gif" : p.endsWith(".zip") ? "application/zip" : p.endsWith(".webm") ? "video/webm" : p.endsWith(".mp4") ? "video/mp4" : "image/jpeg");
 
 let cache: Store | null = null;
 let writing: Promise<void> = Promise.resolve();
@@ -320,6 +320,10 @@ const impl: DbAdapter = {
     await fs.mkdir(path.dirname(full), { recursive: true });
     await fs.writeFile(full, bytes);
     return `/api/files/public/${safeFile(p)}`;
+  },
+  async createPublicUpload(p, contentType) {
+    // development only: the app itself receives the PUT (see /api/files/upload)
+    return { uploadUrl: `/api/files/upload/${safeFile(p)}`, headers: { "content-type": contentType }, url: `/api/files/public/${safeFile(p)}` };
   },
   async putPrivateFile(p, bytes) {
     const full = path.join(FILES_DIR, "private", safeFile(p));

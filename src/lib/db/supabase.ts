@@ -253,6 +253,15 @@ export const supabaseDb: DbAdapter = {
     if (error) throw new Error(error.message);
     return sb().storage.from(THUMBS).getPublicUrl(p).data.publicUrl;
   },
+  async createPublicUpload(p, contentType) {
+    const { data, error } = await sb().storage.from(THUMBS).createSignedUploadUrl(p);
+    if (error || !data) throw new Error(error?.message || "Couldn't prepare the upload.");
+    return {
+      uploadUrl: data.signedUrl,
+      headers: { "content-type": contentType, "cache-control": "max-age=31536000" },
+      url: sb().storage.from(THUMBS).getPublicUrl(p).data.publicUrl,
+    };
+  },
   async putPrivateFile(p, bytes, contentType) {
     const { error } = await sb().storage.from(BUCKET).upload(p, new Blob([bytes as BlobPart], { type: contentType }), { upsert: true, contentType });
     if (error) throw new Error(error.message);

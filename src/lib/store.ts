@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Comment, Profile, Shape, ShapeStyle, ShapeType, Viewer } from "./types";
+import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, Viewer } from "./types";
 import type { PublicReview } from "./review";
 import type { ElementInfo, Rect } from "./frame/dom";
 
@@ -70,6 +70,11 @@ interface State {
   activeThread: string | null;
   draft: DraftPin | null;
   readAt: Record<string, string>; // thread id -> iso last read, or "!" + iso when marked unread
+  /** a screen recording is running for this composer ("draft" or a thread id) */
+  recording: { target: string; startedAt: number } | null;
+  uploading: { target: string; progress: number } | null;
+  /** a finished recording waiting for its composer to pick it up */
+  pendingRecording: { target: string; attachment: Attachment } | null;
 
   // inspect
   hover: HoverInfo | null;
@@ -138,6 +143,9 @@ export const useStore = create<State>((set, get) => ({
   activeThread: null,
   draft: null,
   readAt: {},
+  recording: null,
+  uploading: null,
+  pendingRecording: null,
 
   hover: null,
   selected: null,

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ArrowDownUp,
+  Film,
   Check,
   ChevronDown,
   ChevronRight,
@@ -111,7 +112,8 @@ function Tile({
           {text ||
             (c.attachments?.length ? (
               <span className="inline-flex items-center gap-1 text-ink-3">
-                <ImageIcon size={12} /> Image
+                {c.attachments.some((a) => a.kind === "video") ? <Film size={12} /> : <ImageIcon size={12} />}
+                {c.attachments.some((a) => a.kind === "video") ? "Recording" : "Image"}
               </span>
             ) : (
               <span className="text-ink-3">(empty)</span>
@@ -135,9 +137,14 @@ function Tile({
               <MessageSquare size={10} /> {replies}
             </span>
           )}
-          {c.attachments?.length > 0 && (
+          {c.attachments?.filter((a) => a.kind !== "video").length > 0 && (
             <span className="inline-flex items-center gap-1">
-              <ImageIcon size={10} /> {c.attachments.length}
+              <ImageIcon size={10} /> {c.attachments.filter((a) => a.kind !== "video").length}
+            </span>
+          )}
+          {c.attachments?.some((a) => a.kind === "video") && (
+            <span className="inline-flex items-center gap-1 text-red" title="Has a screen recording">
+              <Film size={10} /> {c.attachments.filter((a) => a.kind === "video").length}
             </span>
           )}
         </div>

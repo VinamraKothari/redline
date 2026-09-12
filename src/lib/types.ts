@@ -90,6 +90,12 @@ export interface Attachment {
   url: string; // data: URL or storage URL
   w?: number;
   h?: number;
+  /** "video" for screen recordings; images have no kind */
+  kind?: "image" | "video";
+  /** seconds, recordings only */
+  duration?: number;
+  /** bytes, recordings only */
+  size?: number;
 }
 
 export interface Comment {

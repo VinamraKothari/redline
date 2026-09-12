@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useStore, threadRoots } from "@/lib/store";
 import { showsAt } from "@/lib/viewports";
+import { stopRecording } from "@/lib/recorder";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
 
@@ -29,6 +30,7 @@ export function useShortcuts() {
       const k = e.key.toLowerCase();
 
       if (e.key === "Escape") {
+        if (st.recording) return stopRecording();
         if (st.hoverLocked) return frame().lockHover(false);
         if (st.fullscreen) return st.set({ fullscreen: false });
         if (st.draft) return st.set({ draft: null });

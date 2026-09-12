@@ -1,9 +1,49 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Square, Trash2 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util";
 import { Dialog, DialogContent } from "@/components/ui/primitives";
+import { cancelRecording, clock, MAX_SECONDS, stopRecording } from "@/lib/recorder";
+
+/** The floating "● 0:07 · Stop" pill while a screen recording runs. */
+function RecordingBar() {
+  const recording = useStore((s) => s.recording);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [recording]);
+  if (!recording) return null;
+  const elapsed = Math.min(MAX_SECONDS, Math.floor((now - recording.startedAt) / 1000));
+  return (
+    <div
+      role="status"
+      aria-label="Screen recording in progress"
+      className="pointer-events-auto fixed left-1/2 top-3 z-[260] flex -translate-x-1/2 items-center gap-2 rounded-full glass-dark py-1 pl-3 pr-1 text-[12.5px] text-white shadow-pop toast-in"
+    >
+      <span className="relative flex h-2.5 w-2.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red opacity-60" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red" />
+      </span>
+      <span className="num font-medium">{clock(elapsed)}</span>
+      <span className="text-white/60">/ {clock(MAX_SECONDS)}</span>
+      <span className="hidden text-white/60 sm:inline">· use the page as normal</span>
+      <button
+        type="button"
+        onClick={() => stopRecording()}
+        className="press ml-1 flex h-7 items-center gap-1.5 rounded-full bg-white px-3 text-[12px] font-semibold text-ink hover:bg-paper"
+      >
+        <Square size={11} fill="currentColor" /> Stop <span className="kbd !py-0.5">Esc</span>
+      </button>
+      <button type="button" onClick={() => cancelRecording()} title="Discard the recording" aria-label="Discard recording" className="press flex h-7 w-7 items-center justify-center rounded-full text-white/70 hover:bg-white/15 hover:text-white">
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
 
 export function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -18,6 +58,7 @@ export function Toasts() {
 
   return (
     <>
+      <RecordingBar />
       <div className="pointer-events-none fixed bottom-5 right-5 z-[250] flex flex-col items-end gap-2">
         {toasts.map((t) => (
           <div

@@ -77,6 +77,8 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   const viewport = useStore((s) => s.viewport);
   const showResolved = useStore((s) => s.showResolved);
   const activeThread = useStore((s) => s.activeThread);
+  // while a screen recording runs the markup steps aside (it stays mounted so drafts survive)
+  const recording = useStore((s) => Boolean(s.recording));
   const draft = useStore((s) => s.draft);
   const layoutTick = useStore((s) => s.layoutTick);
   const readAt = useStore((s) => s.readAt);
@@ -198,7 +200,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   }
 
   return (
-    <PageLayer className="z-[50]">
+    <PageLayer className={cn("z-[50]", recording && "invisible")}>
       {/* regions */}
       {placed
         .filter((p) => p.c.anchor?.region)
@@ -230,7 +232,10 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
           key={p.c.id}
           open={activeThread === p.c.id}
           onOpenChange={(o) => {
-            if (!o && useStore.getState().activeThread === p.c.id) set({ activeThread: null });
+            const st = useStore.getState();
+            // a recording / upload in flight belongs to this thread's composer — keep it mounted
+            if (!o && (st.recording || st.uploading || st.pendingRecording)) return;
+            if (!o && st.activeThread === p.c.id) set({ activeThread: null });
           }}
         >
           <PopoverPrimitive.Anchor asChild>
@@ -261,7 +266,11 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
               updatePositionStrategy="always"
               onOpenAutoFocus={(e) => e.preventDefault()}
               onFocusOutside={(e) => e.preventDefault()}
-              className="z-[150] rounded-lg bg-panel shadow-pop hairline fade-up outline-none"
+              onInteractOutside={(e) => {
+                const st = useStore.getState();
+                if (st.recording || st.uploading || st.pendingRecording) e.preventDefault();
+              }}
+              className={cn("z-[150] rounded-lg bg-panel shadow-pop hairline pop outline-none", recording && "invisible")}
             >
               <Thread rootId={p.c.id} onClose={() => set({ activeThread: null })} />
             </PopoverPrimitive.Content>
@@ -285,8 +294,8 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
               collisionPadding={12}
               updatePositionStrategy="always"
               onFocusOutside={(e) => e.preventDefault()}
-              onInteractOutside={(e) => draft.dirty && e.preventDefault()}
-              className="z-[150] w-[340px] rounded-lg bg-panel p-2.5 shadow-pop hairline fade-up outline-none"
+              onInteractOutside={(e) => (draft.dirty || useStore.getState().recording) && e.preventDefault()}
+              className={cn("z-[150] w-[340px] rounded-lg bg-panel p-2.5 shadow-pop hairline pop outline-none", recording && "invisible")}
             >
               {draft.element_label && (
                 <div className="mono mb-1.5 truncate px-0.5 text-[10.5px] text-ink-3" title={draft.element_label}>
@@ -297,6 +306,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
               <Composer
                 autoFocus
                 withTitle
+                recordTarget="draft"
                 participants={participants}
                 placeholder="Leave a comment… (@ to mention)"
                 onSubmit={submitDraft}

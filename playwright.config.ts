@@ -4,8 +4,9 @@ export default defineConfig({
   testDir: "tests",
   timeout: 60_000,
   retries: 0,
-  // each review spawns a headless Chromium on the server for its preview; keep the load sane
-  workers: 2,
+  // each review spawns a headless Chromium on the server for its preview, and pointer-driven
+  // hover tests are timing-sensitive: one worker keeps the run deterministic (~1.5 min)
+  workers: 1,
   // Proxied pages take a few seconds to render when several tests run at once.
   expect: { timeout: 15_000 },
   use: {
