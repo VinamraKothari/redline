@@ -22,6 +22,8 @@ let stream: MediaStream | null = null;
 let chunks: Blob[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
 let restore: { mode: Mode } | null = null;
+/** a picker is open — a second click must not start a second recorder into the same buffer */
+let starting = false;
 
 export function canRecord(): boolean {
   return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== "undefined";
@@ -35,14 +37,17 @@ function pickMime(): string {
 /** Ask for the screen and start recording for the given composer. */
 export async function startRecording(target: string): Promise<void> {
   const st = useStore.getState();
-  if (st.recording) return;
+  if (st.recording || starting) return;
   if (!canRecord()) {
     st.toast("Screen recording isn't available in this browser — try Chrome or Edge.", "error");
     return;
   }
+  starting = true;
+  let picked: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 30 } },
+    picked = await navigator.mediaDevices.getDisplayMedia({
+      // a review tab is at most ~1.5k wide; capping keeps a minute of clip to a few MB
+      video: { frameRate: { ideal: 24, max: 30 }, width: { max: 1600 }, height: { max: 1000 } },
       audio: false,
       // Chrome: open the picker on this tab, keep the dialog short
       preferCurrentTab: true,
@@ -50,19 +55,38 @@ export async function startRecording(target: string): Promise<void> {
       surfaceSwitching: "exclude",
       monitorTypeSurfaces: "include",
     } as DisplayMediaStreamOptions);
-  } catch {
-    // the user dismissed the picker
+  } catch (e) {
+    const err = e as DOMException;
+    // NotAllowedError = the picker was dismissed; anything else is worth explaining
+    if (err?.name !== "NotAllowedError") {
+      st.toast(
+        err?.name === "NotReadableError"
+          ? "The browser couldn't capture the screen — another app may be using it, or capture is blocked on this machine."
+          : `Couldn't start the recording: ${err?.message || err?.name || "unknown error"}`,
+        "error",
+      );
+    }
+    starting = false;
     return;
   }
+  starting = false;
+  if (useStore.getState().recording || recorder) {
+    // a recording started meanwhile (two pickers answered): keep the first one
+    picked.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  stream = picked;
   chunks = [];
   const mimeType = pickMime();
   try {
-    recorder = new MediaRecorder(stream, { mimeType: mimeType || undefined, videoBitsPerSecond: 2_200_000 });
+    recorder = new MediaRecorder(stream, { mimeType: mimeType || undefined, videoBitsPerSecond: 1_500_000 });
   } catch {
     recorder = new MediaRecorder(stream);
   }
-  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  recorder.onstop = () => void finish(target);
+  const own = recorder;
+  const ownChunks = chunks;
+  own.ondataavailable = (e) => e.data.size && ownChunks.push(e.data);
+  own.onstop = () => void finish(target, own, ownChunks);
   // the browser's own "Stop sharing" ends the track
   stream.getVideoTracks()[0].addEventListener("ended", () => stopRecording());
   recorder.start(1000);
@@ -96,14 +120,23 @@ function cleanup() {
   useStore.setState((s) => ({ recording: null, mode: mode && s.mode === "browse" ? mode : s.mode }));
 }
 
-async function finish(target: string) {
+async function finish(target: string, rec: MediaRecorder, parts: Blob[]) {
   const st = useStore.getState();
   const startedAt = st.recording?.startedAt ?? Date.now();
   const duration = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
   const settings = stream?.getVideoTracks()[0]?.getSettings();
-  const type = (recorder?.mimeType || chunks[0]?.type || "video/webm").split(";")[0];
-  const blob = new Blob(chunks, { type });
+  const type = (rec.mimeType || parts[0]?.type || "video/webm").split(";")[0];
+  let blob = new Blob(parts, { type });
   cleanup();
+  if (type === "video/webm" && blob.size) {
+    // MediaRecorder writes no duration: players show 0:00 and can't seek; patch it in
+    try {
+      const { default: fixWebmDuration } = await import("fix-webm-duration");
+      blob = await fixWebmDuration(blob, Date.now() - startedAt, { logger: false });
+    } catch {
+      /* keep the raw clip */
+    }
+  }
   if (!blob.size) return st.toast("The recording came out empty — try again.", "error");
   const reviewId = st.review?.id;
   if (!reviewId) return;

@@ -51,7 +51,12 @@ test("record the tab from a comment, attach the clip, see it in the thread and i
   const file = await page.request.get(src!);
   expect(file.status()).toBe(200);
   expect(file.headers()["content-type"]).toMatch(/^video\//);
-  expect(Number(file.headers()["content-length"] || (await file.body()).length)).toBeGreaterThan(1000);
+  const bytes = await file.body();
+  expect(bytes.length).toBeGreaterThan(1000);
+  // a real WebM (EBML header) — not a clip that lost its first chunk
+  expect(Array.from(bytes.subarray(0, 4))).toEqual([0x1a, 0x45, 0xdf, 0xa3]);
+  // duration was patched in, so players can show it and seek
+  await expect.poll(async () => video.evaluate((v: HTMLVideoElement) => (Number.isFinite(v.duration) ? v.duration : -1)), { timeout: 15_000 }).toBeGreaterThan(1);
   // Jira: the clip is an Attachment row and a clickable link in the description
   const id = page.url().match(/\/r\/([a-z0-9]+)/)![1];
   const csv = await (await page.request.get(`/api/reviews/${id}/export?format=jira`)).text();
