@@ -7,7 +7,7 @@ import type { ElementInfo, Rect } from "./frame/dom";
 
 export type Mode = "browse" | "comment" | "draw" | "inspect";
 export type Panel = "comments" | "inspect" | null;
-export type CommentFilter = "all" | "unread" | "mine" | "mentions";
+export type CommentFilter = "all" | "unread" | "mine" | "mentions" | "dev";
 export type CommentSort = "newest" | "oldest" | "unread";
 
 export interface HoverInfo {
@@ -70,6 +70,8 @@ interface State {
   activeThread: string | null;
   draft: DraftPin | null;
   readAt: Record<string, string>; // thread id -> iso last read, or "!" + iso when marked unread
+  /** generated "Compare with Figma" comments are shown */
+  showDevComments: boolean;
   /** a screen recording is running for this composer ("draft" or a thread id) */
   recording: { target: string; startedAt: number } | null;
   uploading: { target: string; progress: number } | null;
@@ -143,6 +145,7 @@ export const useStore = create<State>((set, get) => ({
   activeThread: null,
   draft: null,
   readAt: {},
+  showDevComments: true,
   recording: null,
   uploading: null,
   pendingRecording: null,

@@ -99,6 +99,10 @@ export function useShortcuts() {
         window.dispatchEvent(new CustomEvent("redline:capture-state"));
         return;
       }
+      if (e.shiftKey && k === "g") {
+        window.dispatchEvent(new CustomEvent("redline:figma"));
+        return;
+      }
       if (e.shiftKey && k === "j") {
         window.dispatchEvent(new CustomEvent("redline:scripts"));
         return;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Link2, MoreHorizontal, Pencil, RotateCcw, SmilePlus, Trash2, Unlink, Mail, MailOpen } from "lucide-react";
+import { Check, GitCompareArrows, Link2, MoreHorizontal, Pencil, RotateCcw, SmilePlus, Trash2, Unlink, Mail, MailOpen } from "lucide-react";
 import { Avatar, IconButton, Menu, MenuCheckboxItem, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Popover, PopoverContent, PopoverTrigger, Tip } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { repliesOf, useStore } from "@/lib/store";
@@ -9,6 +9,7 @@ import type { Attachment, Comment } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/util";
 import { KIND_LABEL, KIND_ORDER, kindOf, kindsInRange, rangeForKinds, viewportLabel, viewportRange, type ViewportKind } from "@/lib/viewports";
 import { clock } from "@/lib/recorder";
+import { isDevComment } from "@/lib/figma/dev";
 import { CommentBody } from "./CommentBody";
 import { Composer, EMOJIS } from "./Composer";
 
@@ -96,7 +97,7 @@ function CommentItem({ c, isRoot, participants }: { c: Comment; isRoot: boolean;
   const [editing, setEditing] = useState(false);
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const mine = c.author_id === viewer.user_id;
-  const canManage = mine || review?.role === "admin";
+  const canManage = mine || review?.role === "admin" || (c.parent_id === null && isDevComment(c));
 
   async function del() {
     if (!review) return;
@@ -258,10 +259,20 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
     }
   }
 
-  const canRetitle = !viewOnly && (root.author_id === viewer.user_id || review.role === "admin");
+  const canRetitle = !viewOnly && (root.author_id === viewer.user_id || review.role === "admin" || isDevComment(root));
 
   return (
     <div className={cn("flex max-h-[70vh] flex-col", inPanel ? "" : "w-[340px]")}>
+      {isDevComment(root) && root.anchor?.dev && (
+        <div className="flex items-center gap-2 border-b border-line bg-[#7c3aed]/6 px-3 py-1.5 text-[11px] text-[#7c3aed]">
+          <GitCompareArrows size={12} />
+          <span className="font-semibold uppercase tracking-wider">Developer comment</span>
+          <span className="text-ink-3">· {root.anchor.dev.rule} · {root.anchor.dev.severity}</span>
+          <a href={root.anchor.dev.figmaUrl} target="_blank" rel="noreferrer" className="ml-auto underline decoration-[#7c3aed]/40 underline-offset-2" title="Open the Figma frame this was compared with">
+            Figma
+          </a>
+        </div>
+      )}
       <TitleRow root={root} editable={canRetitle} />
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
         {root.anchor?.element_label ? (

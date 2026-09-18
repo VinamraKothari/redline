@@ -222,6 +222,12 @@ const impl: DbAdapter = {
     await persist();
     return c;
   },
+  async createComments(cs) {
+    const s = await load();
+    for (const c of cs) s.comments[c.id] = c;
+    await persist();
+    return cs;
+  },
   async updateComment(id, patch) {
     const s = await load();
     if (!s.comments[id]) return null;

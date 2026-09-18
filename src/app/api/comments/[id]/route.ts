@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { sanitizeViewports } from "@/lib/viewports";
+import { isDevComment } from "@/lib/figma/dev";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
 import type { Anchor, Comment } from "@/lib/types";
 
@@ -17,7 +18,8 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/co
   const c = await d.getComment(id);
   if (!c) throw new HttpError(404, "That comment no longer exists.");
   const { user, role } = await reviewAccess(c.review_id, "edit");
-  const mine = c.author_id === user.id;
+  // generated developer comments belong to the team: anyone who can edit may handle them
+  const mine = c.author_id === user.id || isDevComment(c);
   const may = mine || role === "admin";
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -91,7 +93,7 @@ export const DELETE = guarded(async (_req: NextRequest, ctx: RouteContext<"/api/
   const c = await d.getComment(id);
   if (!c) return Response.json({ ok: true });
   const { user, role } = await reviewAccess(c.review_id, "edit");
-  if (c.author_id !== user.id && role !== "admin") throw new HttpError(403, "You can only delete your own comments.");
+  if (c.author_id !== user.id && role !== "admin" && !isDevComment(c)) throw new HttpError(403, "You can only delete your own comments.");
   if (c.parent_id) await d.deleteComment(id);
   else await d.deleteThread(id);
   return Response.json({ ok: true });

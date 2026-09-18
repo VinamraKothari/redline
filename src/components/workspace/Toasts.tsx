@@ -91,6 +91,7 @@ export function Toasts() {
               ["Full-screen preview", "F"],
               ["Freeze / unfreeze the page", "⇧ F"],
               ["Save this state as a new page", "⇧ P"],
+              ["Compare with Figma", "⇧ G"],
               ["Share & export", "⇧ S"],
               ["Reload the page", "R"],
               ["Site scripts on / off", "⇧ J"],

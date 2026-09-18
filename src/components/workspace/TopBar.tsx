@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, Code2, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
+import { Camera, ChevronDown, Code2, GitCompareArrows, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { AccountMenu } from "@/components/home/AccountMenu";
 import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tip, Button } from "@/components/ui/primitives";
@@ -13,6 +13,7 @@ import { serializeDocument } from "@/lib/frame/dom";
 import { hostOf, cn } from "@/lib/util";
 import { ShareDialog } from "./ShareDialog";
 import { CaptureStateDialog } from "./CaptureStateDialog";
+import { FigmaCompareDialog } from "./FigmaCompareDialog";
 import { PageSwitcher } from "./PageSwitcher";
 import { RealtimeContext } from "./Workspace";
 
@@ -30,6 +31,7 @@ export function TopBar() {
   const set = useStore((s) => s.set);
   const [share, setShare] = useState(false);
   const [captureState, setCaptureState] = useState(false);
+  const [figmaOpen, setFigmaOpen] = useState(false);
   const [freezing, setFreezing] = useState(false);
 
   const vp = VIEWPORTS.find((v) => v.width === viewport);
@@ -48,6 +50,7 @@ export function TopBar() {
   useEffect(() => {
     const share = () => setShare((o) => !o);
     const capture = () => setCaptureState((o) => !o);
+    const figma = () => setFigmaOpen((o) => !o);
     const freeze = () => void toggleFreeze();
     const scriptsToggle = () => {
       const st = useStore.getState();
@@ -56,11 +59,13 @@ export function TopBar() {
     };
     window.addEventListener("redline:share", share);
     window.addEventListener("redline:capture-state", capture);
+    window.addEventListener("redline:figma", figma);
     window.addEventListener("redline:freeze", freeze);
     window.addEventListener("redline:scripts", scriptsToggle);
     return () => {
       window.removeEventListener("redline:share", share);
       window.removeEventListener("redline:capture-state", capture);
+      window.removeEventListener("redline:figma", figma);
       window.removeEventListener("redline:freeze", freeze);
       window.removeEventListener("redline:scripts", scriptsToggle);
     };
@@ -225,6 +230,14 @@ export function TopBar() {
       )}
 
       {!viewOnly && review && (
+        <Tip label="Compare with Figma — every difference becomes a developer comment" kbd="⇧G" side="bottom">
+          <IconButton onClick={() => setFigmaOpen(true)} aria-label="Compare with Figma">
+            <GitCompareArrows size={15} />
+          </IconButton>
+        </Tip>
+      )}
+
+      {!viewOnly && review && (
         <Tip label="Save this state as a new page — open drawer, dialog or locked menu, kept for everyone" kbd="⇧P" side="bottom">
           <IconButton onClick={() => setCaptureState(true)} aria-label="Save this state as a new page">
             <Camera size={15} />
@@ -245,6 +258,7 @@ export function TopBar() {
       </Tip>
       <ShareDialog open={share} onOpenChange={setShare} />
       <CaptureStateDialog open={captureState} onOpenChange={setCaptureState} />
+      <FigmaCompareDialog open={figmaOpen} onOpenChange={setFigmaOpen} />
       <div className="ml-1">
         <AccountMenu size={26} />
       </div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { isUnread, useStore, threadRoots, repliesOf } from "@/lib/store";
 import { showsAt } from "@/lib/viewports";
+import { isDevComment } from "@/lib/figma/dev";
 import { frame } from "@/lib/frame/controller";
 import { api } from "@/lib/api";
 import type { Comment } from "@/lib/types";
@@ -77,6 +78,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   const viewport = useStore((s) => s.viewport);
   const showResolved = useStore((s) => s.showResolved);
   const activeThread = useStore((s) => s.activeThread);
+  const showDevComments = useStore((s) => s.showDevComments);
   // while a screen recording runs the markup steps aside (it stays mounted so drafts survive)
   const recording = useStore((s) => Boolean(s.recording));
   const draft = useStore((s) => s.draft);
@@ -93,7 +95,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   const placed: Placed[] = useMemo(() => {
     void layoutTick; // re-place pins whenever the page layout changes
-    const roots = threadRoots(comments).filter((c) => showsAt(c, viewport) && (showResolved || !c.resolved || c.id === activeThread));
+    const roots = threadRoots(comments).filter((c) => showsAt(c, viewport) && (showResolved || !c.resolved || c.id === activeThread) && (showDevComments || !isDevComment(c) || c.id === activeThread));
     return roots
       .map((c) => {
         if (!c.anchor) return null;
@@ -106,7 +108,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
       })
       .filter(Boolean) as Placed[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.user_id]);
+  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.user_id, showDevComments]);
 
   // scroll to the active thread's pin when it's opened from the panel / permalink
   useEffect(() => {
@@ -242,7 +244,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
             <div className="absolute" style={{ left: p.x, top: p.y, width: 0, height: 0 }}>
               <Pin
                 color={p.c.resolved ? "#1f9d55" : p.c.author_color}
-                label={p.c.resolved ? "✓" : initials(p.c.author_name)}
+                label={p.c.resolved ? "✓" : isDevComment(p.c) ? "</>" : initials(p.c.author_name)}
                 active={activeThread === p.c.id}
                 detached={p.detached}
                 unread={p.unread}

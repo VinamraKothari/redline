@@ -36,6 +36,8 @@ export interface DbAdapter {
   listComments(reviewId: string): Promise<Comment[]>;
   getComment(id: string): Promise<Comment | null>;
   createComment(c: Comment): Promise<Comment>;
+  /** inserts many comments in one go (developer comments from a comparison run) */
+  createComments(cs: Comment[]): Promise<Comment[]>;
   updateComment(id: string, patch: Partial<Comment>): Promise<Comment | null>;
   deleteComment(id: string): Promise<void>;
   /** deletes a thread root and all replies */

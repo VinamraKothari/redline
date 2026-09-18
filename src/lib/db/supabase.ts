@@ -170,6 +170,11 @@ export const supabaseDb: DbAdapter = {
   async createComment(c) {
     return must(await sb().from("comments").insert(c).select().single<Comment>());
   },
+  async createComments(cs) {
+    const out: Comment[] = [];
+    for (let i = 0; i < cs.length; i += 100) out.push(...must(await sb().from("comments").insert(cs.slice(i, i + 100)).select().returns<Comment[]>()));
+    return out;
+  },
   async updateComment(id, patch) {
     const { data } = await sb().from("comments").update(patch).eq("id", id).select().maybeSingle<Comment>();
     return data ?? null;

@@ -182,6 +182,15 @@ export const api = {
   putReads(reviewId: string, reads: Record<string, string>) {
     return call<{ reads: Record<string, string> }>(`/api/reviews/${reviewId}/reads`, { method: "PUT", body: JSON.stringify({ reads }) });
   },
+  figmaStatus() {
+    return call<{ configured: boolean }>("/api/figma", { cache: "no-store" });
+  },
+  figmaCompare(reviewId: string, figmaUrl: string, snapshot: unknown, viewport: number) {
+    return postJson<{ figma: { fileKey: string; nodeId: string; name: string; width: number; height: number }; findings: number; created: number; kept: number; removed: number; summary: string; comments: Comment[] }>(
+      `/api/reviews/${reviewId}/figma-compare`,
+      { figmaUrl, snapshot, viewport },
+    );
+  },
   freeze(reviewId: string, html: string) {
     return postJson<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { html });
   },
