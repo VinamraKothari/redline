@@ -14,6 +14,7 @@ import type { ImplNode, ImplSnapshot } from "./snapshot";
 
 export type Rule =
   | "section-spacing"
+  | "text-style"
   | "copy"
   | "copy-case"
   | "copy-punctuation"
@@ -61,6 +62,8 @@ export interface Finding {
   region?: { x: number; y: number; w: number; h: number } | null;
   /** what the finding is about, in a few words (the text, the image) — for grouped lists */
   subject?: string;
+  /** for gaps: the direction measured */
+  axis?: "x" | "y";
   fingerprint: string;
 }
 
@@ -125,7 +128,7 @@ function dice(a: string, b: string): number {
   for (const [k, v] of A) inter += Math.min(v, B.get(k) || 0);
   return (2 * inter) / (na + nb);
 }
-const PLACEHOLDER = /lorem ipsum|dolor sit amet|consectetur|adipiscing|placeholder|category tag|marvin mckinney|jun 5, 2025|12 min read|^\d+(\.\d+)?k?$|^text$|^heading$|^tagline$/i;
+const PLACEHOLDER = /lorem ipsum|dolor sit amet|consectetur|adipiscing|placeholder|category tag|marvin mckinney|jun 5, 2025|12 min read|^\d+(\.\d+)?k?$|^text$|^heading$|^tagline$|^[\w.+-]+@[\w-]+\.[\w.]+$/i;
 function isPlaceholder(s: string): boolean {
   return PLACEHOLDER.test(norm(s));
 }
@@ -169,13 +172,56 @@ function iou(a: { x: number; y: number; w: number; h: number }, b: { x: number; 
   const union = a.w * a.h + b.w * b.h - inter;
   return union > 0 ? inter / union : 0;
 }
-function shortName(n: SpecNode): string {
-  const t = n.text?.chars ? norm(n.text.chars) : n.name;
-  return t.length > 48 ? t.slice(0, 45) + "…" : t;
+/** a quoted, shortened piece of copy: “Diamonds aren't just beautiful, they're…” */
+function q(s: string, n = 42): string {
+  const t = norm(s);
+  return `“${t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t}”`;
+}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** comment titles are one line: cut at a word boundary past the limit */
+export const TITLE_MAX = 220;
+function fitTitle(t: string, max = TITLE_MAX): string {
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  return cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 30)).trimEnd() + "…";
+}
+const WEIGHT_NAMES: Record<number, string> = { 100: "thin", 200: "extra-light", 300: "light", 400: "regular", 500: "medium", 600: "semibold", 700: "bold", 800: "extra-bold", 900: "black" };
+const weightName = (w: number) => `${w}${WEIGHT_NAMES[w] ? ` ${WEIGHT_NAMES[w]}` : ""}`;
+/** two versions of a sentence, quoted around the words that differ: “…they're kidna beautiful…” */
+function diffQuote(a: string, b: string, ctx = 3): [string, string] {
+  const an = norm(a);
+  const bn = norm(b);
+  if (an.length <= 44 && bn.length <= 44) return [`“${an}”`, `“${bn}”`];
+  const A = an.split(" ");
+  const B = bn.split(" ");
+  let i = 0;
+  while (i < A.length && i < B.length && A[i] === B[i]) i++;
+  let j = 0;
+  while (j < A.length - i && j < B.length - i && A[A.length - 1 - j] === B[B.length - 1 - j]) j++;
+  const seg = (W: string[]) => {
+    const s = Math.max(0, i - ctx);
+    const e = Math.min(W.length, W.length - j + ctx);
+    return `“${s > 0 ? "…" : ""}${W.slice(s, e).join(" ")}${e < W.length ? "…" : ""}”`;
+  };
+  return [seg(A), seg(B)];
 }
 function styleSummary(t: SpecText): string {
   const parts = [t.family, t.weight ? String(t.weight) : "", t.size ? `${t.size}px` : "", t.lineHeight && t.lineHeight !== "auto" ? `lh ${t.lineHeight}` : ""].filter(Boolean);
   return parts.join(" ");
+}
+/** one typographic difference on a text — several of them make one "text style" finding */
+interface TypoDiff {
+  rule: Rule;
+  /** "font size" */
+  label: string;
+  expected: string;
+  actual: string;
+  /** fuller values for the body (line height in px at the size) */
+  expectedLong?: string;
+  actualLong?: string;
+  css: string;
+  severity: Finding["severity"];
+  note?: string;
 }
 
 /* ── flatten the design ──────────────────────────────────────────────────── */
@@ -244,7 +290,7 @@ function prepare(impl: ImplSnapshot): ImplSnapshot {
 /* ── the comparison ──────────────────────────────────────────────────────── */
 
 export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOptions = {}): Finding[] {
-  const tol = { position: 2, size: 4, gap: 1, font: 0.6, ...(opts.tolerance ?? {}) };
+  const tol = { position: 2, size: 4, gap: 2, font: 0.6, ...(opts.tolerance ?? {}) };
   const limit = opts.limit ?? 400;
   const impl = prepare(rawImpl);
   // a narrower page (a scrollbar took 15px) centres everything a little to the left
@@ -258,7 +304,7 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     const fp = `${f.rule}|${f.figmaId}|${f.sel || f.dom || ""}`;
     if (seen.has(fp)) return;
     seen.add(fp);
-    findings.push({ ...f, fingerprint: fp });
+    findings.push({ ...f, title: fitTitle(f.title), fingerprint: fp });
   };
   const nodes = impl.nodes;
   const parentOf = (i: number) => (i >= 0 ? nodes[i].p : -1);
@@ -402,6 +448,104 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     match.set(f, joined);
   }
 
+  // ── naming: say what a layer is the way a reader sees it ─────────────────
+  // “Frame 1639” means nothing to anyone; “the title “Bridal Guide”” does. Texts are
+  // quoted (with the page's wording, when matched), images by the text next to them,
+  // frames by what they hold, sections by their heading.
+  const textOf = (f: FNode): string => match.get(f)?.text?.chars ?? f.text?.chars ?? "";
+  const isButtonish = (f: FNode) => f.depth > 0 && (/button|btn|\bcta\b/i.test(f.name) || /button/i.test(f.comp ?? ""));
+  // a filled or outlined button is "the button"; a bare text button is "the link"
+  const hasFill = (p: FNode) => (!!p.fill && p.fill.toLowerCase() !== "#ffffff") || !!p.stroke || !!p.children?.some((c) => c.type !== "TEXT" && c.v !== false && c.fill && c.fill.toLowerCase() !== "#ffffff" && c.w >= p.w * 0.8);
+  const btnWord = (p: FNode) => (hasFill(p) ? "the button" : "the link");
+  const wordy = (f: FNode) => /\p{L}/u.test(norm(textOf(f)));
+  const GENERIC = /^(frame|group|rectangle|rect|ellipse|vector|image|img|icon|icons?|component|instance|union|mask|shape|layer|element|item|slot)?\s*\d*$/i;
+  const iconName = (f: FNode): string | null => {
+    let n = f.name.split(/\s*[/:]\s*/).pop() ?? "";
+    n = n.replace(/^noun[-_ ]/i, "").replace(/[-_ ]\d{3,}$/, "").replace(/\bversion\s*\d+$/i, "").replace(/[-_]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    return n && !GENERIC.test(n) && n.length <= 24 && !/^(image|img|photo|picture)\b/i.test(n) ? n : null;
+  };
+  const iconPhrase = (name: string, plural = false) => (/\bicons?$/.test(name) ? `the ${plural ? name.replace(/icon$/, "icons") : name}` : `the “${name}” ${plural ? "icons" : "icon"}`);
+  const isImgNode = (f: FNode) => f.type !== "TEXT" && !!(f.image || f.icon || (/(^|\W)(image|img|photo|picture|placeholder image)(\W|$)/i.test(f.name) && (f.type === "RECTANGLE" || f.type === "FRAME")));
+  const textsInCache = new Map<FNode, FNode[]>();
+  const textsIn = (f: FNode): FNode[] => {
+    if (textsInCache.has(f)) return textsInCache.get(f)!;
+    const out: FNode[] = [];
+    const walk = (m: SpecNode) => {
+      const fm = byId.get(m.id);
+      if (!fm) return;
+      if (fm !== f && fm.type === "TEXT" && fm.text && norm(fm.text.chars).length > 0 && !isPlaceholder(fm.text.chars)) out.push(fm);
+      m.children?.forEach(walk);
+    };
+    walk(f);
+    out.sort((a, b) => (Math.abs(a.y - b.y) <= 6 ? a.x - b.x : a.y - b.y));
+    textsInCache.set(f, out);
+    return out;
+  };
+  const roleOf = (f: FNode): string => {
+    const t = f.text!;
+    const chars = norm(textOf(f));
+    for (let p = f.parent; p; p = p.parent) if (isButtonish(p)) return btnWord(p);
+    if (t.decoration === "UNDERLINE") return "the link";
+    if (/^[\/|·•–—\-:]+$/.test(chars)) return "the separator";
+    if (/^[\d.,€$%KkMm+\s]+$/.test(chars)) return "the number";
+    if ((t.size ?? 0) >= 28) return "the heading";
+    if ((t.size ?? 0) >= 18 || ((t.weight ?? 0) >= 600 && chars.length <= 60)) return "the title";
+    if (chars.length > 90) return "the paragraph starting";
+    return "the text";
+  };
+  const secDesc = (s: FNode): string => {
+    const last = spec.sections.length - 1;
+    if (s.section === 0 && /header|navbar|nav\b/i.test(s.name)) return "the header";
+    if (s.section === last && /footer/i.test(s.name)) return "the footer";
+    const all = textsIn(s);
+    const texts = all.filter(wordy).length ? all.filter(wordy) : all;
+    if (!texts.length) return `the “${s.name}” section`;
+    const heading = texts.reduce((best, t) => ((t.text!.size ?? 0) > (best.text!.size ?? 0) ? t : best), texts[0]);
+    return `the section ${q(textOf(heading), 36)}`;
+  };
+  const whoCache = new Map<FNode, string>();
+  const who = (f: FNode): string => {
+    if (whoCache.has(f)) return whoCache.get(f)!;
+    let out: string;
+    if (f.type === "TEXT" && f.text) out = `${roleOf(f)} ${q(textOf(f))}`;
+    else if (f.depth === 0) out = secDesc(f);
+    else if (isImgNode(f)) {
+      const icon = f.icon || (f.w <= 64 && f.h <= 64);
+      // a generically named vector inside a small named frame takes the frame's name
+      const named = icon ? iconName(f) ?? (f.parent && f.parent.depth > 0 && f.parent.w <= 64 && f.parent.h <= 64 ? iconName(f.parent) : null) : null;
+      const kind = named ? iconPhrase(named) : icon ? "the icon" : "the image";
+      let near: FNode | undefined;
+      let at: FNode | null = null;
+      for (let p = f.parent; p && !near; p = p.parent) {
+        near = textsIn(p).find((t) => !isInside(t, f) && wordy(t));
+        at = p;
+      }
+      const sec = fnodes.find((n) => n.depth === 0 && n.section === f.section);
+      const edgeDist = near ? Math.max(0, near.y - (f.y + f.h), f.y - (near.y + near.h)) : 0;
+      const far = !!near && (edgeDist > 120 || (at?.depth ?? 1) === 0);
+      out = named ? kind : near && !far ? `${kind} next to ${who(near)}` : sec ? `${kind} in ${secDesc(sec)}` : `${kind} (${Math.round(f.w)}×${Math.round(f.h)}px in the design)`;
+    } else {
+      const all = textsIn(f);
+      const texts = all.filter(wordy).length ? all.filter(wordy) : all;
+      if (isButtonish(f) && texts.length) out = `${btnWord(f)} ${q(textOf(texts[0]))}`;
+      else if (texts.length === 1) out = who(texts[0]);
+      else if (texts.length > 1) {
+        const hasImg = f.w <= 720 && fnodes.some((n) => n !== f && isInside(n, f) && isImgNode(n) && n.w > 64);
+        out = `the ${hasImg ? "card" : "block"} starting with ${q(textOf(texts[0]), 36)}`;
+      } else {
+        const imgs = fnodes.filter((n) => n !== f && isInside(n, f) && isImgNode(n) && !fnodes.some((m) => m !== n && m !== f && isInside(n, m) && isInside(m, f) && isImgNode(m)));
+        if (imgs.length >= 2) {
+          const names = [...new Set(imgs.map((n) => (n.icon || (n.w <= 64 && n.h <= 64) ? iconName(n) : null)).filter(Boolean) as string[])];
+          const small = imgs.every((n) => n.icon || (n.w <= 64 && n.h <= 64));
+          out = names.length === 1 ? `the ${imgs.length} ${iconPhrase(names[0], true).replace(/^the /, "")}` : `the ${imgs.length} ${small ? "icons" : "images"}`;
+        } else out = imgs.length ? who(imgs[0]) : `the “${f.name}” element`;
+      }
+    }
+    whoCache.set(f, out);
+    return out;
+  };
+  const pageEl = (d?: ImplNode | null) => (d?.label ? `page element: ${d.label}` : "");
+
   // ── 2. text findings ─────────────────────────────────────────────────────
   const xCands: { f: FNode; d: ImplNode; dx: number; centered: boolean }[] = [];
   for (const f of ordered) {
@@ -410,11 +554,12 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     if (!d) {
       if (!isPlaceholder(t.chars) && key(t.chars).length >= 3 && !/^[\d.,€$%]+$/.test(norm(t.chars))) {
         const y = Math.max(0, f.y + offsetAt(f.y));
+        const inSec = f.depth > 0 ? ` in ${secDesc(fnodes.find((s) => s.depth === 0 && s.section === f.section)!)}` : "";
         add({
           rule: "missing-text",
           severity: "high",
-          title: `Missing text: “${shortName(f)}”`,
-          body: `The design has the text “${norm(t.chars).slice(0, 160)}” (${styleSummary(t)}) at x ${px(f.x)}, but nothing matching it renders on the page near that position.\n\nFigma layer: ${f.name}\nFix: add the element, or check that it is not hidden / conditionally rendered.`,
+          title: `The text ${q(t.chars)} is missing on the page`,
+          body: `The design has ${roleOf(f)} “${norm(t.chars).slice(0, 200)}”${inSec} (${styleSummary(t)}), but nothing matching it renders on the page near that position.\n\nFix: add the element, or check that it is not hidden / conditionally rendered.`,
           expected: norm(t.chars).slice(0, 160),
           actual: "not found",
           figmaId: f.id,
@@ -430,8 +575,9 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     }
     const kind = matchKind.get(f)!;
     const dt = d.text!;
-    const base = { figmaId: f.id, figmaName: f.name, dom: d.i, sel: d.sel, label: d.label, x: d.x, y: d.y, w: d.w, h: d.h, subject: `“${norm(dt.chars).slice(0, 48)}${norm(dt.chars).length > 48 ? "…" : ""}”` };
-    const where = `${d.label}`;
+    const base = { figmaId: f.id, figmaName: f.name, dom: d.i, sel: d.sel, label: d.label, x: d.x, y: d.y, w: d.w, h: d.h, subject: q(dt.chars, 48) };
+    const me = who(f);
+    const where = pageEl(d);
 
     // a placeholder left on the page where the design has real copy
     if (kind === "position" && isPlaceholder(dt.chars) && !isPlaceholder(t.chars)) {
@@ -439,8 +585,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "copy",
         severity: "high",
-        title: `Placeholder “${norm(dt.chars).slice(0, 30)}” → should read “${norm(t.chars).slice(0, 40)}”`,
-        body: `Page (${where}): “${norm(dt.chars)}” — placeholder text\nFigma (${f.name}): “${norm(t.chars)}”\n\nReplace the placeholder with the real copy (or wire up the CMS field).`,
+        title: `The placeholder ${q(dt.chars, 30)} should read ${q(t.chars, 50)}`,
+        body: `On the page: “${norm(dt.chars)}” — placeholder text (${where})\nIn the design: “${norm(t.chars)}”\n\nReplace the placeholder with the real copy (or wire up the CMS field).`,
         expected: norm(t.chars).slice(0, 160),
         actual: norm(dt.chars),
       });
@@ -451,8 +597,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "copy",
         severity: "medium",
-        title: `Paragraph split into ${parts.length} elements — the design has one text block`,
-        body: `Page (${where}): ${parts.length} separate elements${parts.map((p) => `\n• “${norm(p.text!.chars).slice(0, 70)}…”`).join("")}\nFigma (${f.name}): one text layer\n\nRender it as one element (line breaks inside), so spacing and wrapping follow the design.`,
+        title: `${cap(me)} is split into ${parts.length} separate elements — the design has it as one text block`,
+        body: `On the page the paragraph is ${parts.length} separate elements:${parts.map((p) => `\n• “${norm(p.text!.chars).slice(0, 70)}…”`).join("")}\nIn the design it is one text layer.\n\nRender it as one element (line breaks inside), so spacing and wrapping follow the design.`,
         expected: "1 text block",
         actual: `${parts.length} elements`,
       });
@@ -470,20 +616,21 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
             ...base,
             rule: "copy-case",
             severity: "low",
-            title: `Capitalisation: “${dn.slice(0, 40)}” → “${fcase.slice(0, 40)}”`,
-            body: `Page (${where}): “${dn}”\nFigma: “${fcase}”\n\nOnly the letter case differs. ${t.case === "UPPER" ? "The design uses uppercase — prefer text-transform: uppercase over hard-coded caps." : "Match the design's casing in the copy (or drop the text-transform)."}`,
+            title: `${q(dn, 48)} should be written ${q(fcase, 48)} (capitalisation)`,
+            body: `On the page: “${dn}” (${where})\nIn the design: “${fcase}”\n\nOnly the letter case differs. ${t.case === "UPPER" ? "The design uses uppercase — prefer text-transform: uppercase over hard-coded caps." : "Match the design's casing in the copy (or drop the text-transform)."}`,
             expected: fcase,
             actual: dn,
           });
         } else if (stripPunct(fcase) === stripPunct(dcase)) {
           const fEnd = fcase.slice(stripPunct(fcase).length);
           const dEnd = dcase.slice(stripPunct(dcase).length);
+          const mark = (s: string) => (s === "." ? "a full stop" : s === "!" ? "an exclamation mark" : s === "?" ? "a question mark" : s === "…" ? "an ellipsis" : `“${s}”`);
           add({
             ...base,
             rule: "copy-punctuation",
             severity: "low",
-            title: fEnd && !dEnd ? `Missing “${fEnd}” at the end of “${stripPunct(dn).slice(0, 36)}…”` : !fEnd && dEnd ? `Extra “${dEnd}” at the end of “${stripPunct(dn).slice(0, 36)}…”` : `Punctuation differs: “${dEnd}” → “${fEnd}”`,
-            body: `Page (${where}): “${dn}”\nFigma: “${fcase}”\n\nOnly the trailing punctuation differs.`,
+            title: fEnd && !dEnd ? `${q(stripPunct(dn), 44)} should end with ${mark(fEnd)} like in the design` : !fEnd && dEnd ? `${q(stripPunct(dn), 44)} should not end with ${mark(dEnd)} — the design has none` : `${q(stripPunct(dn), 40)} should end with ${mark(fEnd)}, not ${mark(dEnd)}`,
+            body: `On the page: “${dn}” (${where})\nIn the design: “${fcase}”\n\nOnly the trailing punctuation differs.`,
             expected: fcase,
             actual: dn,
           });
@@ -492,8 +639,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
             ...base,
             rule: "copy",
             severity: "medium",
-            title: `Copy differs: “${dn.slice(0, 44)}${dn.length > 44 ? "…" : ""}”`,
-            body: `Page (${where}):\n“${dn}”\n\nFigma (${f.name}):\n“${fcase}”\n\nUpdate the copy to match the design (or confirm the change with content).`,
+            title: `${diffQuote(dn, fcase)[0]} should read ${diffQuote(dn, fcase)[1]}`,
+            body: `On the page (${where}):\n“${dn}”\n\nIn the design:\n“${fcase}”\n\nUpdate the copy to match the design (or confirm the change with content).`,
             expected: fcase,
             actual: dn,
           });
@@ -501,121 +648,66 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       }
     }
 
-    // typography — skip runs the design itself styles inconsistently
+    // typography — every difference on this text becomes one "text style" finding.
+    // Runs the design itself styles inconsistently (mixed segments) are skipped for weight / colour.
     const mixed = !!t.segments && t.segments.length > 1;
+    const diffs: TypoDiff[] = [];
     if (t.size && Math.abs(dt.size - t.size) > tol.font) {
-      add({
-        ...base,
-        rule: "font-size",
-        severity: "medium",
-        title: `Font size ${px(dt.size)} → should be ${px(t.size)}`,
-        body: `Page (${where}): font-size ${px(dt.size)} on “${norm(dt.chars).slice(0, 60)}”\nFigma: ${px(t.size)} (${styleSummary(t)})\n\nSet font-size: ${px(t.size)}${mixed ? " (the layer mixes sizes — check the segment)" : ""}.`,
-        expected: px(t.size),
-        actual: px(dt.size),
-      });
+      diffs.push({ rule: "font-size", label: "font size", expected: px(t.size), actual: px(dt.size), css: `font-size: ${px(t.size)}`, severity: "medium", note: mixed ? "the design layer mixes sizes — check the segment" : undefined });
     }
     if (t.weight && !mixed && Math.abs(dt.weight - t.weight) >= 100) {
-      add({
-        ...base,
-        rule: "font-weight",
-        severity: "medium",
-        title: `Font weight ${dt.weight} → should be ${t.weight}${t.style ? ` (${t.style})` : ""}`,
-        body: `Page (${where}): font-weight ${dt.weight} on “${norm(dt.chars).slice(0, 60)}”\nFigma: ${t.weight}${t.style ? ` — ${t.family} ${t.style}` : ""}\n\nSet font-weight: ${t.weight}.`,
-        expected: String(t.weight),
-        actual: String(dt.weight),
-      });
+      diffs.push({ rule: "font-weight", label: "font weight", expected: weightName(t.weight), actual: weightName(dt.weight), css: `font-weight: ${t.weight}`, severity: "medium" });
     }
     if (t.family && famKey(t.family) && famKey(dt.family) && !famKey(dt.family).startsWith(famKey(t.family)) && !famKey(t.family).startsWith(famKey(dt.family))) {
-      add({
-        ...base,
-        rule: "font-family",
-        severity: "high",
-        title: `Font family “${dt.family}” → should be “${t.family}”`,
-        body: `Page (${where}): font-family ${dt.family}\nFigma: ${t.family}${t.style ? ` ${t.style}` : ""}\n\nLoad and apply “${t.family}” for this text.`,
-        expected: t.family,
-        actual: dt.family,
-      });
+      diffs.push({ rule: "font-family", label: "font", expected: t.family, actual: dt.family, css: `font-family: '${t.family}'`, severity: "high", note: `load and apply “${t.family}”` });
     }
     const flh = lhPx(t);
     if (flh && t.size && Number.isFinite(dt.lineHeight) && dt.lineHeight > 0) {
       const fr = flh / t.size;
       const dr = dt.lineHeight / dt.size;
       if (Math.abs(fr - dr) > 0.06 && Math.abs(dt.lineHeight - (dt.size * flh) / t.size) > 1.2) {
-        add({
-          ...base,
-          rule: "line-height",
-          severity: "low",
-          title: `Line height ${r1(dr * 100)}% → should be ${r1(fr * 100)}%`,
-          body: `Page (${where}): line-height ${px(dt.lineHeight)} at ${px(dt.size)} (${r1(dr * 100)}%)\nFigma: ${t.lineHeight} → ${px(flh)} at ${px(t.size)}\n\nSet line-height: ${r1(fr * 100)}% (${px((dt.size * flh) / t.size)} at the current size).`,
-          expected: `${r1(fr * 100)}%`,
-          actual: `${r1(dr * 100)}%`,
-        });
+        diffs.push({ rule: "line-height", label: "line height", expected: `${r1(fr * 100)}%`, actual: `${r1(dr * 100)}%`, expectedLong: `${r1(fr * 100)}% (${px(flh)} at ${px(t.size)})`, actualLong: `${r1(dr * 100)}% (${px(dt.lineHeight)} at ${px(dt.size)})`, css: `line-height: ${r1(fr * 100)}%`, severity: "low" });
       }
     }
     const fls = lsPx(t);
     if (t.size && Math.abs(fls - dt.letterSpacing) > 0.25 && Math.abs(fls / t.size - dt.letterSpacing / dt.size) > 0.008) {
-      add({
-        ...base,
-        rule: "letter-spacing",
-        severity: "low",
-        title: `Letter spacing ${px(dt.letterSpacing)} → should be ${px(fls)}`,
-        body: `Page (${where}): letter-spacing ${px(dt.letterSpacing)}\nFigma: ${t.letterSpacing ?? 0}${typeof t.letterSpacing === "number" ? "px" : ""} (${px(fls)} at ${px(t.size)})\n\nSet letter-spacing: ${px(fls)}.`,
-        expected: px(fls),
-        actual: px(dt.letterSpacing),
-      });
+      diffs.push({ rule: "letter-spacing", label: "letter spacing", expected: px(fls), actual: px(dt.letterSpacing), css: `letter-spacing: ${px(fls)}`, severity: "low" });
     }
     if (t.color && !mixed && hexRgb(dt.color) && !colorClose(t.color, dt.color)) {
-      add({
-        ...base,
-        rule: "text-color",
-        severity: "medium",
-        title: `Text colour ${dt.color} → should be ${t.color}`,
-        body: `Page (${where}): color ${dt.color} on “${norm(dt.chars).slice(0, 60)}”\nFigma: ${t.color}\n\nSet color: ${t.color}.`,
-        expected: t.color,
-        actual: dt.color,
-      });
+      diffs.push({ rule: "text-color", label: "text colour", expected: t.color, actual: dt.color, css: `color: ${t.color}`, severity: "medium" });
     }
     if (t.case && t.case !== "ORIGINAL" && t.case !== "MIXED") {
       const want = t.case === "UPPER" ? "uppercase" : t.case === "LOWER" ? "lowercase" : t.case === "TITLE" ? "capitalize" : null;
       const isAlready = t.case === "UPPER" ? norm(dt.chars) === norm(dt.chars).toUpperCase() : t.case === "LOWER" ? norm(dt.chars) === norm(dt.chars).toLowerCase() : false;
       if (want && dt.transform !== want && !isAlready) {
-        add({
-          ...base,
-          rule: "text-transform",
-          severity: "low",
-          title: `Text should be ${want}`,
-          body: `Page (${where}): text-transform ${dt.transform}\nFigma: ${t.case}\n\nSet text-transform: ${want}.`,
-          expected: want,
-          actual: dt.transform,
-        });
+        diffs.push({ rule: "text-transform", label: "letter case", expected: want, actual: dt.transform || "as typed", css: `text-transform: ${want}`, severity: "low" });
       }
     }
     if (t.decoration === "UNDERLINE" && !/underline/.test(dt.decoration)) {
-      add({
-        ...base,
-        rule: "text-decoration",
-        severity: "low",
-        title: "Text should be underlined",
-        body: `Page (${where}): text-decoration ${dt.decoration || "none"}\nFigma: UNDERLINE\n\nSet text-decoration: underline.`,
-        expected: "underline",
-        actual: dt.decoration || "none",
-      });
+      diffs.push({ rule: "text-decoration", label: "underline", expected: "underlined", actual: "not underlined", css: "text-decoration: underline", severity: "low" });
     }
     // alignment matters when the block wraps
     if (t.align && dt.lines > 1 && f.w > 200) {
       const want = t.align === "CENTER" ? "center" : t.align === "RIGHT" ? "right" : t.align === "JUSTIFIED" ? "justify" : "left";
       const have = dt.align === "start" ? "left" : dt.align === "end" ? "right" : dt.align;
-      if (want !== have) {
-        add({
-          ...base,
-          rule: "text-align",
-          severity: "low",
-          title: `Text alignment ${have} → should be ${want}`,
-          body: `Page (${where}): text-align ${have}\nFigma: ${t.align}\n\nSet text-align: ${want}.`,
-          expected: want,
-          actual: have,
-        });
-      }
+      if (want !== have) diffs.push({ rule: "text-align", label: "alignment", expected: want, actual: have, css: `text-align: ${want}`, severity: "low" });
+    }
+    if (diffs.length) {
+      const sev = diffs.some((x) => x.severity === "high") ? "high" : diffs.some((x) => x.severity === "medium") ? "medium" : "low";
+      const shown = diffs.slice(0, 3);
+      const title =
+        diffs.length === 1
+          ? `The ${diffs[0].label} of ${me} should be ${diffs[0].expected} — it is ${diffs[0].actual} right now`
+          : `${cap(me)} — ${shown.map((x) => `${x.label} should be ${x.expected} (it is ${x.actual})`).join(", ")}${diffs.length > 3 ? `, +${diffs.length - 3} more` : ""}`;
+      add({
+        ...base,
+        rule: diffs.length === 1 ? diffs[0].rule : "text-style",
+        severity: sev,
+        title,
+        body: `${cap(me)} (${where}):\n${diffs.map((x) => `• ${cap(x.label)}: ${x.actualLong ?? x.actual} on the page → ${x.expectedLong ?? x.expected} in the design${x.note ? ` — ${x.note}` : ""}`).join("\n")}\n\nCSS to apply:\n${diffs.map((x) => `${x.css};`).join(" ")}`,
+        expected: diffs.map((x) => x.expected).join(" · "),
+        actual: diffs.map((x) => x.actual).join(" · "),
+      });
     }
     // horizontal position — the layouts share a width, so x is directly comparable
     // (reported after the layout pass, once per shifted block rather than per line)
@@ -630,14 +722,13 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "width",
         severity: "low",
-        title: `Text column ${px(d.w)} wide → should be ${px(f.w)}`,
-        body: `Page (${where}): ${px(d.w)} wide (${dt.lines} lines)\nFigma: ${px(f.w)} wide\n\nMatch the max-width / column width so the copy wraps like the design.`,
+        title: `${cap(me)} should be ${px(f.w)} wide — it is ${px(d.w)} right now, so the lines break differently`,
+        body: `On the page the text runs ${px(d.w)} wide (${dt.lines} lines; ${where}).\nIn the design it is ${px(f.w)} wide.\n\nMatch the max-width / column width so the copy wraps like the design.`,
         expected: px(f.w),
         actual: px(d.w),
       });
     }
   }
-
   // ── 3. images & icons ────────────────────────────────────────────────────
   const fImgs = fnodes.filter((f) => (f.image || f.icon || (/(^|\W)(image|img|photo|picture|placeholder image)(\W|$)/i.test(f.name) && (f.type === "RECTANGLE" || f.type === "FRAME"))) && f.w > 0 && f.h > 0 && f.type !== "TEXT");
   const dImgs = nodes.filter((n) => n.img && n.w > 0 && n.h > 0 && !dTaken.has(n.i));
@@ -665,15 +756,16 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
   for (const d of dImgs) {
     if (d.img?.kind !== "img" || d.img.natW !== 0 || d.img.pending || d.w < 24 || d.h < 24) continue;
     const src = d.img.src.replace(/^.*\//, "");
+    const f = [...imgMatch.entries()].find(([, dm]) => dm.i === d.i)?.[0];
     add({
       rule: "missing-image",
       severity: "high",
-      title: `Image not loading${src ? `: ${src.slice(0, 50)}` : ""}`,
-      body: `Page (${d.label}): the <img> renders at ${Math.round(d.w)}×${Math.round(d.h)}px but has no pixels (naturalWidth 0)${d.img.src ? `\nsrc: …${d.img.src.slice(-80)}` : ""}\n\nCheck the file exists and the URL / CDN path is right; if it is lazy-loaded, make sure it loads once scrolled into view.`,
+      title: `${f ? cap(who(f)) : "An image"} is not loading — it shows as an empty ${Math.round(d.w)}×${Math.round(d.h)}px box${src ? ` (${src.slice(0, 50)})` : ""}`,
+      body: `On the page the <img> renders at ${Math.round(d.w)}×${Math.round(d.h)}px but has no pixels (naturalWidth 0; ${pageEl(d)})${d.img.src ? `\nsrc: …${d.img.src.slice(-80)}` : ""}\n\nCheck the file exists and the URL / CDN path is right; if it is lazy-loaded, make sure it loads once scrolled into view.`,
       expected: "a loaded image",
       actual: "empty (naturalWidth 0)",
       figmaId: "page#img:" + (d.sel || d.i),
-      figmaName: "",
+      figmaName: f?.name ?? "",
       dom: d.i,
       sel: d.sel,
       label: d.label,
@@ -687,14 +779,15 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
   for (const f of fImgs) {
     const d = imgMatch.get(f);
     const isIcon = f.icon || (f.w <= 64 && f.h <= 64);
+    const me = who(f);
     if (!d) {
       if (isIcon || f.w < 24 || f.h < 24) continue;
       const y = f.y + offsetAt(f.y);
       add({
         rule: "missing-image",
         severity: "high",
-        title: `Image missing or misplaced: “${f.name}” (${Math.round(f.w)}×${Math.round(f.h)})`,
-        body: `The design places an image “${f.name}” ${Math.round(f.w)}×${Math.round(f.h)}px at x ${px(f.x)}; no image renders there on the page.\n\nFix: add the image, or check its src / lazy-loading; if it is elsewhere on the page, move it to match the layout.`,
+        title: `${cap(me)} (${Math.round(f.w)}×${Math.round(f.h)}px in the design) is missing on the page`,
+        body: `The design places an image of ${Math.round(f.w)}×${Math.round(f.h)}px here (${px(f.x)} from the left); no image renders there on the page.\n\nFix: add the image, or check its src / lazy-loading; if it is elsewhere on the page, move it to match the layout.`,
         expected: `${Math.round(f.w)}×${Math.round(f.h)} at x ${px(f.x)}`,
         actual: "not found",
         figmaId: f.id,
@@ -707,27 +800,32 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       });
       continue;
     }
-    const base = { figmaId: f.id, figmaName: f.name, dom: d.i, sel: d.sel, label: d.label, x: d.x, y: d.y, w: d.w, h: d.h, subject: `${isIcon ? "icon" : "image"} ${Math.round(d.w)}×${Math.round(d.h)} (${d.label})` };
+    const base = { figmaId: f.id, figmaName: f.name, dom: d.i, sel: d.sel, label: d.label, x: d.x, y: d.y, w: d.w, h: d.h, subject: `${me} — ${Math.round(d.w)}×${Math.round(d.h)}px` };
     const dw = d.w - f.w;
     const dh = d.h - f.h;
-    if (Math.abs(dw) > Math.max(tol.size, f.w * 0.03) || Math.abs(dh) > Math.max(tol.size, f.h * 0.03)) {
+    const sizeOff = Math.abs(dw) > Math.max(tol.size, f.w * 0.03) || Math.abs(dh) > Math.max(tol.size, f.h * 0.03);
+    const shift = d.x - f.x;
+    const xOff = !isIcon && Math.abs(shift) > tol.position + 1 + xSlack;
+    const size = (w: number, h: number) => `${Math.round(w)}×${Math.round(h)}px`;
+    if (sizeOff) {
       add({
         ...base,
         rule: "image-size",
         severity: Math.abs(dw) > 20 || Math.abs(dh) > 20 ? "medium" : "low",
-        title: `${isIcon ? "Icon" : "Image"} ${Math.round(d.w)}×${Math.round(d.h)} → should be ${Math.round(f.w)}×${Math.round(f.h)}`,
-        body: `Page (${d.label}): ${Math.round(d.w)}×${Math.round(d.h)}px${d.img?.natW ? ` (source ${d.img.natW}×${d.img.natH})` : ""}\nFigma (${f.name}): ${Math.round(f.w)}×${Math.round(f.h)}px${f.radius ? `, radius ${f.radius}px` : ""}\n\nSet width/height (or aspect-ratio) to match; check object-fit.`,
-        expected: `${Math.round(f.w)}×${Math.round(f.h)}`,
-        actual: `${Math.round(d.w)}×${Math.round(d.h)}`,
+        title: `${cap(me)} should be ${size(f.w, f.h)} — it is ${size(d.w, d.h)} right now`,
+        body: `On the page: ${size(d.w, d.h)}${d.img?.natW ? ` (source file ${d.img.natW}×${d.img.natH})` : ""} (${pageEl(d)})\nIn the design: ${size(f.w, f.h)}${f.radius ? `, corner radius ${f.radius}px` : ""}\n\nSet width/height (or aspect-ratio) to match; check object-fit.`,
+        expected: size(f.w, f.h),
+        actual: size(d.w, d.h),
       });
     }
-    if (!isIcon && Math.abs(d.x - f.x) > tol.position + 1 + xSlack) {
+    if (xOff) {
+      // folded into the size finding at the end unless a gap already explains the shift
       add({
         ...base,
         rule: "image-position",
         severity: "low",
-        title: `Image sits ${px(Math.abs(d.x - f.x))} too far ${d.x > f.x ? "right" : "left"}`,
-        body: `Page (${d.label}): left edge at x ${px(d.x)}\nFigma (${f.name}): x ${px(f.x)}\n\nShift by ${px(f.x - d.x)}.`,
+        title: `${cap(me)} sits ${px(Math.abs(shift))} too far ${shift > 0 ? "right" : "left"}`,
+        body: `On the page its left edge is ${px(d.x)} from the left of the page (${pageEl(d)}).\nIn the design it is at ${px(f.x)}.\n\nShift it by ${px(f.x - d.x)}.`,
         expected: px(f.x),
         actual: px(d.x),
       });
@@ -737,8 +835,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "radius",
         severity: "low",
-        title: `Corner radius ${px(d.radius)} → should be ${px(f.radius || 0)}`,
-        body: `Page (${d.label}): border-radius ${px(d.radius)}\nFigma (${f.name}): ${px(f.radius || 0)}\n\nSet border-radius: ${px(f.radius || 0)}.`,
+        title: `The corners of ${me} should be rounded by ${px(f.radius || 0)} — they are ${px(d.radius)} right now`,
+        body: `On the page: border-radius ${px(d.radius)} (${pageEl(d)})\nIn the design: ${px(f.radius || 0)}\n\nSet border-radius: ${px(f.radius || 0)}.`,
         expected: px(f.radius || 0),
         actual: px(d.radius),
       });
@@ -804,11 +902,13 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       const edge = b.centered ? "centre" : "left edge";
       const have = b.centered ? box.x + box.w / 2 : box.x;
       const want = have - b.dx;
+      const blkName = blk.depth === 0 ? `the content of ${who(blk)}` : who(blk);
+      const me = many && blk.type !== "TEXT" ? `${blkName}${b.items.length > 1 ? ` (${b.items.length} texts)` : ""}` : who(blk);
       add({
         rule: "position-x",
         severity: Math.abs(b.dx) > 8 ? "medium" : "low",
-        title: many ? `Block “${blk.name}” (${b.items.length} element${b.items.length === 1 ? "" : "s"}, e.g. “${shortName(first.f)}”) sits ${px(Math.abs(b.dx))} too far ${b.dx > 0 ? "right" : "left"}` : `“${shortName(blk)}” sits ${px(Math.abs(b.dx))} too far ${b.dx > 0 ? "right" : "left"}`,
-        body: `Page (${first.d.label}): ${edge} at x ${px(have)}\nFigma (${blk.name}): x ${px(want)}${many ? `\nAffects ${b.items.length} element${b.items.length === 1 ? "" : "s"} in this block, e.g. ${b.items.slice(0, 4).map((i) => `“${shortName(i.f)}”`).join(", ")}` : ""}\n\nShift by ${px(-b.dx)} (check the container's width, padding or margin).`,
+        title: `${cap(me)} sits ${px(Math.abs(b.dx))} too far ${b.dx > 0 ? "right" : "left"}`,
+        body: `On the page its ${edge} is ${px(have)} from the left of the page (${pageEl(first.d)}).\nIn the design it is at ${px(want)}.${many ? `\nAffects ${b.items.length} text${b.items.length === 1 ? "" : "s"} in this block, e.g. ${b.items.slice(0, 4).map((i) => q(textOf(i.f), 36)).join(", ")}` : ""}\n\nShift by ${px(-b.dx)} (check the container's width, padding or margin).`,
         expected: px(want),
         actual: px(have),
         figmaId: blk.id + "#x",
@@ -859,21 +959,29 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
   {
     const secs = fnodes.filter((f) => f.depth === 0).map((s) => ({ s, r: repText(s) })).filter((x) => x.r && x.r.n >= 2);
     // the space above and below a section's copy, against its own container
+    const edgeText = (s: FNode, side: "top" | "bottom"): FNode | undefined => {
+      const all = textsIn(s).filter((t) => match.has(t) && matchKind.get(t) !== "position");
+      const ts = all.filter(wordy).length ? all.filter(wordy) : all;
+      if (!ts.length) return undefined;
+      return side === "top" ? ts.reduce((b, t) => (t.y < b.y ? t : b), ts[0]) : ts.reduce((b, t) => (t.y + t.h > b.y + b.h ? t : b), ts[0]);
+    };
     for (const { s, r } of secs) {
       const box = sectionBox(s, r!);
       if (!box) continue;
-      const checks = [
+      const checks: { side: "top" | "bottom"; want: number; have: number }[] = [
         { side: "top", want: r!.f.y - s.y, have: r!.d.y - box.y },
         { side: "bottom", want: s.y + s.h - (r!.f.y + r!.f.h), have: box.y + box.h - (r!.d.y + r!.d.h) },
       ];
       for (const c of checks) {
         if (c.want < 0 || c.have < 0 || Math.abs(c.have - c.want) <= Math.max(tol.gap, 3)) continue;
         const region = c.side === "top" ? { x: r!.d.x, y: box.y, w: r!.d.w, h: Math.max(1, c.have) } : { x: r!.d.x, y: r!.d.y + r!.d.h, w: r!.d.w, h: Math.max(1, c.have) };
+        const et = edgeText(s, c.side);
+        const what = et ? who(et) : `the ${c.side === "top" ? "first" : "last"} content`;
         add({
           rule: "padding",
           severity: Math.abs(c.have - c.want) >= 16 ? "medium" : "low",
-          title: `Section “${s.name}”: ${px(c.have)} above${c.side === "bottom" ? "/below" : ""} the content → design ${px(c.want)} (${c.side})`.replace(" above/below", " below"),
-          body: `Page (${box.label}): ${px(c.have)} from the section's ${c.side} edge to its ${c.side === "top" ? "first" : "last"} text\nFigma (${s.name}): ${px(c.want)}\n\nAdjust the section's padding-${c.side} by ${px(c.want - c.have)}.`,
+          title: `The space ${c.side === "top" ? "above" : "below"} ${what} at the ${c.side} of ${secDesc(s)} should be ${px(c.want)} — it is ${px(c.have)} right now`,
+          body: `On the page there are ${px(c.have)} between the section's ${c.side} edge and ${what} (${pageEl(box)}).\nIn the design there are ${px(c.want)}.\n\n${c.want > c.have ? "Increase" : "Reduce"} the section's padding-${c.side} by ${px(Math.abs(c.want - c.have))}.`,
           expected: px(c.want),
           actual: px(c.have),
           figmaId: s.id + `#${c.side}`,
@@ -904,8 +1012,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       add({
         rule: "section-spacing",
         severity: Math.abs(delta) >= 16 ? "medium" : "low",
-        title: `Space between sections “${a.s.name}” and “${b.s.name}” is ${px(dGap)} → design ${px(fGap)}`,
-        body: `Page: ${px(dGap)} from the last content of “${a.s.name}” to the first content of “${b.s.name}”\nFigma: ${px(fGap)}\n\n${delta > 0 ? "Reduce" : "Increase"} the section padding / margin by ${px(Math.abs(delta))}.`,
+        title: `The space between ${secDesc(a.s)} and ${secDesc(b.s)} should be ${px(fGap)} — it is ${px(dGap)} right now`,
+        body: `On the page there are ${px(dGap)} from the last text of ${secDesc(a.s)} to the first text of ${secDesc(b.s)}.\nIn the design there are ${px(fGap)}.\n\n${delta > 0 ? "Reduce" : "Increase"} the section padding / margin by ${px(Math.abs(delta))}.`,
         expected: px(fGap),
         actual: px(dGap),
         figmaId: b.s.id + "#space",
@@ -1011,18 +1119,21 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       if (opts.debugGap && opts.debugGap.test(f.name)) console.error("GAP", f.name, "|", a.k.name, pa ? `page#${pa.i}` : "rep", JSON.stringify(da), "|", b.k.name, pb ? `page#${pb.i}` : "rep", JSON.stringify(db), "| f", fGap, "d", dGap);
       if (fGap < -1 || dGap < -60) continue; // overlapping / different structure
       const delta = dGap - fGap;
-      if (Math.abs(delta) <= tol.gap) continue;
+      // small slips, and slips that are small next to the distance itself (5px on 570px), are noise
+      if (Math.abs(delta) <= Math.max(tol.gap, fGap * 0.02)) continue;
       // wrapped rows (children broke onto another line) are structural, not spacing
       if (horizontal && Math.abs(db.y - da.y) > Math.max(da.h, db.h)) continue;
-      const nameA = shortName(a.k);
-      const nameB = shortName(b.k);
+      const nameA = who(a.k);
+      const nameB = who(b.k);
       const region = horizontal ? { x: da.x + da.w, y: Math.min(da.y, db.y), w: Math.max(1, dGap), h: Math.max(da.h, db.h) } : { x: Math.min(da.x, db.x), y: da.y + da.h, w: Math.max(da.w, db.w), h: Math.max(1, dGap) };
       const domB = allMatches.get(b.k) ?? [...allMatches.entries()].find(([k]) => k.parent === b.k || k.parent?.parent === b.k)?.[1];
       add({
         rule: "gap",
+        axis: horizontal ? "x" : "y",
+        subject: `between ${nameA} and ${nameB}`,
         severity: Math.abs(delta) >= 8 ? "medium" : "low",
-        title: `${horizontal ? "Horizontal" : "Vertical"} gap ${px(dGap)} → should be ${px(fGap)} (between “${nameA}” and “${nameB}”)`,
-        body: `Page: ${px(dGap)} between “${nameA}” and “${nameB}”\nFigma (${f.name}${f.layout?.gap ? `, gap ${f.layout.gap}px` : ""}): ${px(fGap)}\n\n${delta > 0 ? "Reduce" : "Increase"} the spacing by ${px(Math.abs(delta))} (margin / gap / padding on the ${horizontal ? "row" : "stack"}).`,
+        title: `The ${horizontal ? "horizontal " : ""}space between ${nameA} and ${nameB} should be ${px(fGap)} — it is ${px(dGap)} right now`,
+        body: `On the page there are ${px(dGap)} between ${nameA} and ${nameB}${horizontal ? " (side by side)" : ""}.\nIn the design there are ${px(fGap)}${f.layout?.gap ? ` (auto-layout gap ${f.layout.gap}px)` : ""}.\n\n${delta > 0 ? "Reduce" : "Increase"} the spacing by ${px(Math.abs(delta))} (margin / gap / padding on the ${horizontal ? "row" : "stack"}).`,
         expected: px(fGap),
         actual: px(dGap),
         figmaId: f.id + (i ? `#${i}` : ""),
@@ -1059,25 +1170,40 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       checks.push({ side: "top", want: r.f.y - f.y, have: r.d.y - box.y });
       if (Math.abs(r.f.h - r.d.h) <= 4) checks.push({ side: "bottom", want: f.y + f.h - (r.f.y + r.f.h), have: box.y + box.h - (r.d.y + r.d.h) });
     }
-    for (const c of checks) {
-      if (Math.abs(c.have - c.want) <= tol.gap + 1) continue;
+    const off = checks.filter((c) => Math.abs(c.have - c.want) > tol.gap + 1);
+    const content = textsIn(f).filter(wordy).length >= 2 ? `the content of ${who(f)}` : who(f);
+    const regionOf = (c: (typeof checks)[number]) => (c.side === "left" ? { x: box.x, y: r.d.y, w: Math.max(1, c.have), h: r.d.h } : c.side === "right" ? { x: r.d.x + r.d.w, y: r.d.y, w: Math.max(1, c.have), h: r.d.h } : c.side === "top" ? { x: r.d.x, y: box.y, w: r.d.w, h: Math.max(1, c.have) } : { x: r.d.x, y: r.d.y + r.d.h, w: r.d.w, h: Math.max(1, c.have) });
+    const common = { figmaName: f.name, dom: lca, sel: box.sel, label: box.label, x: box.x, y: box.y, w: box.w, h: box.h };
+    // less on the left and as much more on the right: the content is shifted, not padded
+    const L = off.find((c) => c.side === "left");
+    const R = off.find((c) => c.side === "right");
+    if (L && R && Math.abs(L.have - L.want + (R.have - R.want)) <= 3) {
+      const shift = L.have - L.want;
       add({
+        ...common,
+        rule: "padding",
+        severity: Math.abs(shift) >= 8 ? "medium" : "low",
+        title: `${cap(content)} ${/^the \d+ /.test(content) ? "sit" : "sits"} ${px(Math.abs(shift))} too far ${shift > 0 ? "right" : "left"} inside its box`,
+        body: `On the page the content has ${px(L.have)} on its left and ${px(R.have)} on its right (${pageEl(box)}).\nIn the design it has ${px(L.want)} on the left and ${px(R.want)} on the right.\n\nMove the content by ${px(-shift)} (padding / justify-content / text-align of the container).`,
+        expected: `${px(L.want)} left / ${px(R.want)} right`,
+        actual: `${px(L.have)} left / ${px(R.have)} right`,
+        figmaId: f.id + "#lr",
+        region: regionOf(shift > 0 ? L : R),
+      });
+    }
+    for (const c of off) {
+      if (L && R && (c === L || c === R) && Math.abs(L.have - L.want + (R.have - R.want)) <= 3) continue;
+      const edgeWord = c.side === "top" ? "above" : c.side === "bottom" ? "below" : `to the ${c.side} of`;
+      add({
+        ...common,
         rule: "padding",
         severity: Math.abs(c.have - c.want) >= 8 ? "medium" : "low",
-        title: `${c.side[0].toUpperCase() + c.side.slice(1)} inset ${px(c.have)} → should be ${px(c.want)} in “${f.name}”`,
-        body: `Page (${box.label}): ${px(c.have)} from the container's ${c.side} edge to its content\nFigma (${f.name}): ${px(c.want)}\n\nAdjust padding-${c.side} (or the child's margin) by ${px(c.want - c.have)}.`,
+        title: `The space ${edgeWord} ${content} (inside its box) should be ${px(c.want)} — it is ${px(c.have)} right now`,
+        body: `On the page there are ${px(c.have)} from the container's ${c.side} edge to its content (${pageEl(box)}).\nIn the design there are ${px(c.want)}.\n\n${c.want > c.have ? "Increase" : "Reduce"} padding-${c.side} (or the child's margin) by ${px(Math.abs(c.want - c.have))}.`,
         expected: px(c.want),
         actual: px(c.have),
         figmaId: f.id + `#${c.side}`,
-        figmaName: f.name,
-        dom: lca,
-        sel: box.sel,
-        label: box.label,
-        x: box.x,
-        y: box.y,
-        w: box.w,
-        h: box.h,
-        region: c.side === "left" ? { x: box.x, y: r.d.y, w: Math.max(1, c.have), h: r.d.h } : c.side === "right" ? { x: r.d.x + r.d.w, y: r.d.y, w: Math.max(1, c.have), h: r.d.h } : c.side === "top" ? { x: r.d.x, y: box.y, w: r.d.w, h: Math.max(1, c.have) } : { x: r.d.x, y: r.d.y + r.d.h, w: r.d.w, h: Math.max(1, c.have) },
+        region: regionOf(c),
       });
     }
   }
@@ -1092,8 +1218,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       add({
         rule: "section-height",
         severity: "low",
-        title: `Section “${s.name}” is ${px(node.h)} tall → design ${px(s.h)}`,
-        body: `Page (${node.label}): ${px(node.h)} tall\nFigma (${s.name}): ${px(s.h)}\n\nUsually a result of the spacing / padding differences listed for this section; content height can differ with real copy.`,
+        title: `${cap(secDesc(s))} is ${px(node.h)} tall — in the design it is ${px(s.h)}`,
+        body: `On the page the section is ${px(node.h)} tall (${pageEl(node)}).\nIn the design it is ${px(s.h)}.\n\nUsually a result of spacing / padding differences inside the section; the height of real copy can differ too.`,
         expected: px(s.h),
         actual: px(node.h),
         figmaId: s.id + "#h",
@@ -1119,8 +1245,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       add({
         rule: "background",
         severity: "medium",
-        title: `Section background ${have ?? "#ffffff"} → should be ${want}`,
-        body: `Page (${node.label}): background ${have ?? "none (white)"}\nFigma (${s.name}): ${want}\n\nSet background-color: ${want}.`,
+        title: `The background of ${secDesc(s)} should be ${want} — it is ${have ?? "white (#ffffff)"} right now`,
+        body: `On the page the section's background is ${have ?? "none (white)"} (${pageEl(node)}).\nIn the design it is ${want}.\n\nSet background-color: ${want}.`,
         expected: want,
         actual: have ?? "#ffffff",
         figmaId: s.id + "#bg",
@@ -1149,7 +1275,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       }
     }
     if (!ctl) continue;
-    const base = { figmaId: f.id, figmaName: f.name, dom: ctl.i, sel: ctl.sel, label: ctl.label, x: ctl.x, y: ctl.y, w: ctl.w, h: ctl.h };
+    const base = { figmaId: f.id, figmaName: f.name, dom: ctl.i, sel: ctl.sel, label: ctl.label, x: ctl.x, y: ctl.y, w: ctl.w, h: ctl.h, subject: q(dText.text!.chars, 40) };
+    const me = `the button ${q(dText.text!.chars, 36)}`;
     // a text link's box is its type: the font-size / line-height findings already cover it
     const textOnly = !f.fill && !f.stroke && !ctl.bg && !ctl.border;
     if (!textOnly && (Math.abs(ctl.w - f.w) > 2 || Math.abs(ctl.h - f.h) > 2)) {
@@ -1157,8 +1284,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "height",
         severity: "medium",
-        title: `Button ${Math.round(ctl.w)}×${Math.round(ctl.h)} → should be ${Math.round(f.w)}×${Math.round(f.h)}`,
-        body: `Page (${ctl.label}): ${Math.round(ctl.w)}×${Math.round(ctl.h)}px\nFigma (${f.name}): ${Math.round(f.w)}×${Math.round(f.h)}px${f.layout ? ` (padding ${f.layout.pt}/${f.layout.pr}/${f.layout.pb}/${f.layout.pl})` : ""}\n\nMatch the width / height (padding + line-height).`,
+        title: `${cap(me)} should be ${Math.round(f.w)}×${Math.round(f.h)}px — it is ${Math.round(ctl.w)}×${Math.round(ctl.h)}px right now`,
+        body: `On the page the button is ${Math.round(ctl.w)}×${Math.round(ctl.h)}px (${pageEl(ctl)}).\nIn the design it is ${Math.round(f.w)}×${Math.round(f.h)}px${f.layout ? ` (padding ${f.layout.pt}/${f.layout.pr}/${f.layout.pb}/${f.layout.pl})` : ""}.\n\nMatch the width / height (padding + line-height).`,
         expected: `${Math.round(f.w)}×${Math.round(f.h)}`,
         actual: `${Math.round(ctl.w)}×${Math.round(ctl.h)}`,
       });
@@ -1168,8 +1295,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "background",
         severity: "medium",
-        title: `Button background ${ctl.bg ?? "none"} → should be ${f.fill}`,
-        body: `Page (${ctl.label}): background ${ctl.bg ?? "none"}\nFigma (${f.name}): ${f.fill}\n\nSet background-color: ${f.fill}.`,
+        title: `The background of ${me} should be ${f.fill} — it is ${ctl.bg ?? "none"} right now`,
+        body: `On the page the button's background is ${ctl.bg ?? "none"} (${pageEl(ctl)}).\nIn the design it is ${f.fill}.\n\nSet background-color: ${f.fill}.`,
         expected: f.fill,
         actual: ctl.bg ?? "none",
       });
@@ -1179,8 +1306,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "border",
         severity: "low",
-        title: `Button border → ${f.stroke.w}px ${f.stroke.hex}`,
-        body: `Page (${ctl.label}): border ${ctl.border ? `${px(ctl.border.w)} ${ctl.border.color}` : "none"}\nFigma (${f.name}): ${f.stroke.w}px ${f.stroke.hex}\n\nSet border: ${f.stroke.w}px solid ${f.stroke.hex}.`,
+        title: `${cap(me)} should have a ${f.stroke.w}px ${f.stroke.hex} border — it has ${ctl.border ? `a ${px(ctl.border.w)} ${ctl.border.color} border` : "none"} right now`,
+        body: `On the page: border ${ctl.border ? `${px(ctl.border.w)} ${ctl.border.color}` : "none"} (${pageEl(ctl)})\nIn the design: ${f.stroke.w}px ${f.stroke.hex}\n\nSet border: ${f.stroke.w}px solid ${f.stroke.hex}.`,
         expected: `${f.stroke.w}px ${f.stroke.hex}`,
         actual: ctl.border ? `${px(ctl.border.w)} ${ctl.border.color}` : "none",
       });
@@ -1190,8 +1317,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
         ...base,
         rule: "radius",
         severity: "low",
-        title: `Button radius ${px(ctl.radius)} → should be ${px(f.radius || 0)}`,
-        body: `Page (${ctl.label}): border-radius ${px(ctl.radius)}\nFigma (${f.name}): ${px(f.radius || 0)}\n\nSet border-radius: ${px(f.radius || 0)}.`,
+        title: `The corners of ${me} should be rounded by ${px(f.radius || 0)} — they are ${px(ctl.radius)} right now`,
+        body: `On the page: border-radius ${px(ctl.radius)} (${pageEl(ctl)})\nIn the design: ${px(f.radius || 0)}\n\nSet border-radius: ${px(f.radius || 0)}.`,
         expected: px(f.radius || 0),
         actual: px(ctl.radius),
       });
@@ -1248,8 +1375,8 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     add({
       rule: "extra-text",
       severity: "low",
-      title: `${extras.length} text element${extras.length === 1 ? "" : "s"} on the page not in the design`,
-      body: `These texts render on the page but have no counterpart in the Figma frame (often CMS content or a newer copy deck — verify they are intended):\n${list}${extras.length > 10 ? `\n…and ${extras.length - 10} more` : ""}`,
+      title: `${extras.length} text${extras.length === 1 ? "" : "s"} on the page ${extras.length === 1 ? "is" : "are"} not in the design, e.g. ${q(first.text!.chars, 40)}`,
+      body: `These texts render on the page but have no counterpart in the design (often CMS content or a newer copy deck — verify they are intended):\n${list}${extras.length > 10 ? `\n…and ${extras.length - 10} more` : ""}`,
       expected: "—",
       actual: `${extras.length} extra`,
       figmaId: spec.id + "#extra",
@@ -1264,10 +1391,26 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
     });
   }
 
-  // an x offset that a horizontal gap error to its left already explains is not a second finding
-  const hgaps = findings.filter((f) => f.rule === "gap" && f.region && f.region.w > 0 && f.region.h > 0 && /^Horizontal/.test(f.title));
+  // ── 8. one cause, one comment ────────────────────────────────────────────
+  const fnodeOf = (f: Finding) => byId.get(f.figmaId.replace(/#.*$/, ""));
+  const sectionOf = (f: Finding) => fnodeOf(f)?.section ?? -1;
+  const hgaps = findings.filter((f) => f.rule === "gap" && f.axis === "x" && f.region && f.region.w > 0 && f.region.h > 0);
+  const insets = findings.filter((f) => f.rule === "padding" && /#(left|right|lr)$/.test(f.figmaId));
+  const layoutRules = new Set<Rule>(["padding", "gap", "section-spacing", "image-size", "width"]);
+  const layoutSections = new Set(findings.filter((f) => layoutRules.has(f.rule)).map(sectionOf));
   const explained = (f: Finding): boolean => {
+    // a section's height follows from the spacing differences reported inside it
+    if (f.rule === "section-height") return layoutSections.has(sectionOf(f));
     if (f.rule !== "position-x" && f.rule !== "image-position") return false;
+    const blk = fnodeOf(f);
+    // an x offset that a horizontal gap or inset in an enclosing row already explains
+    if (blk) {
+      const within = (g: Finding) => {
+        const frame = fnodeOf(g);
+        return !!frame && (frame === blk || isInside(blk, frame));
+      };
+      if (hgaps.some(within) || insets.some(within)) return true;
+    }
     const dx = parseFloat(f.actual) - parseFloat(f.expected);
     return hgaps.some((g) => {
       const gd = parseFloat(g.actual) - parseFloat(g.expected);
@@ -1275,18 +1418,30 @@ export function compare(spec: FigmaSpec, rawImpl: ImplSnapshot, opts: CompareOpt
       return g.region!.x <= f.x && bandOverlap > 0 && Math.abs(gd - dx) <= 1.5;
     });
   };
-  const kept = findings.filter((f) => !explained(f));
+  let kept = findings.filter((f) => !explained(f));
+  // an image that is both the wrong size and in the wrong place: one comment
+  for (const pos of kept.filter((f) => f.rule === "image-position")) {
+    const size = kept.find((f) => f.rule === "image-size" && f.figmaId === pos.figmaId);
+    if (!size) continue;
+    const m = pos.title.match(/ sits .*$/);
+    size.title = size.title.replace(/ right now$/, "") + (m ? ` and${m[0]}` : "");
+    size.body += `\n\nIt also sits ${px(Math.abs(parseFloat(pos.actual) - parseFloat(pos.expected)))} too far ${parseFloat(pos.actual) > parseFloat(pos.expected) ? "right" : "left"}: left edge at ${pos.actual} on the page, ${pos.expected} in the design.`;
+    kept = kept.filter((f) => f !== pos);
+  }
   const order: Record<Finding["severity"], number> = { high: 0, medium: 1, low: 2 };
   const sorted = kept.sort((a, b) => a.y - b.y || order[a.severity] - order[b.severity]);
-  const sectionOf = (f: Finding) => byId.get(f.figmaId.replace(/#.*$/, ""))?.section ?? -1;
   return (opts.group === false ? sorted : groupFindings(sorted, sectionOf)).slice(0, limit);
 }
 
-const GROUPABLE = new Set<Rule>(["font-size", "font-weight", "font-family", "line-height", "letter-spacing", "text-color", "text-transform", "text-decoration", "text-align", "copy-case", "image-size", "image-position", "height", "gap", "width", "radius", "border"]);
+const GROUPABLE = new Set<Rule>(["text-style", "font-size", "font-weight", "font-family", "line-height", "letter-spacing", "text-color", "text-transform", "text-decoration", "text-align", "copy-case", "image-size", "image-position", "height", "gap", "width", "radius", "border"]);
+
+/** numbers in a value rounded, so 187.1px and 187.5px group together */
+const roundKey = (v: string) => v.replace(/-?\d+(\.\d+)?/g, (m) => String(Math.round(parseFloat(m))));
 
 /**
  * The same deviation on many elements of a section is one thing to fix —
- * one finding, pinned to the first element, listing the others.
+ * one finding, pinned to the first element, listing the others. Capitalisation
+ * slips group by section whatever the words.
  */
 function groupFindings(findings: Finding[], sectionOf: (f: Finding) => number): Finding[] {
   const groups = new Map<string, Finding[]>();
@@ -1296,7 +1451,7 @@ function groupFindings(findings: Finding[], sectionOf: (f: Finding) => number): 
       out.push(f);
       continue;
     }
-    const k = `${f.rule}|${f.expected}|${f.actual}|${sectionOf(f)}`;
+    const k = f.rule === "copy-case" ? `copy-case|${sectionOf(f)}` : `${f.rule}|${roundKey(f.expected)}|${roundKey(f.actual)}|${sectionOf(f)}`;
     const g = groups.get(k);
     if (g) {
       g.push(f);
@@ -1311,12 +1466,23 @@ function groupFindings(findings: Finding[], sectionOf: (f: Finding) => number): 
     if (g.length < 2) continue;
     const first = g[0];
     const others = g.slice(1);
-    const where = (f: Finding) => `• ${f.subject ?? f.label ?? f.figmaName}${f.subject && f.label ? ` (${f.label})` : ""}`;
+    if (first.rule === "copy-case") {
+      merged.set(first, {
+        ...first,
+        title: `${g.length} texts in this section are capitalised differently from the design, e.g. ${q(first.actual, 36)} → ${q(first.expected, 36)}`,
+        body: `On the page → in the design:\n${g.slice(0, 14).map((f) => `• “${f.actual}” → “${f.expected}”`).join("\n")}${g.length > 14 ? `\n…and ${g.length - 14} more` : ""}\n\nOnly the letter case differs. Match the design's casing in the copy (or the text-transform).`,
+        expected: g.map((f) => f.expected).join(" | "),
+        actual: g.map((f) => f.actual).join(" | "),
+        fingerprint: `copy-case|s${sectionOf(first)}|${g.length}`,
+      });
+      continue;
+    }
+    const where = (f: Finding) => `• ${f.subject ?? f.label ?? f.figmaName}${f.subject && f.label ? ` — ${f.label}` : ""}`;
     merged.set(first, {
       ...first,
-      title: `${first.title} (×${g.length})`,
+      title: `${first.title} (${g.length} places)`,
       body: `${first.body}\n\nThe same on ${others.length} more element${others.length === 1 ? "" : "s"} in this section:\n${others.slice(0, 12).map(where).join("\n")}${others.length > 12 ? `\n…and ${others.length - 12} more` : ""}`,
-      fingerprint: `${first.rule}|${first.expected}|${first.actual}|s${sectionOf(first)}|${g.length}`,
+      fingerprint: `${first.rule}|${roundKey(first.expected)}|${roundKey(first.actual)}|s${sectionOf(first)}|${g.length}`,
     });
   }
   return out.filter((f): f is Finding => !!f).map((f) => merged.get(f) ?? f);

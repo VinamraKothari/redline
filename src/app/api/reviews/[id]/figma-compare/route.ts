@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
 import { readJson } from "@/lib/body";
 import { newId } from "@/lib/util";
-import { compare, summarize, type Finding } from "@/lib/figma/compare";
+import { compare, summarize, TITLE_MAX, type Finding } from "@/lib/figma/compare";
 import { fetchFigmaSpec, FigmaError } from "@/lib/figma/fetch";
 import { parseFigmaUrl } from "@/lib/figma/spec";
 import type { ImplSnapshot } from "@/lib/figma/snapshot";
@@ -98,7 +98,7 @@ function toComment(reviewId: string, f: Finding, figmaUrl: string, viewport: num
     author_id: null,
     author_name: DEV_AUTHOR,
     author_color: DEV_COLOR,
-    title: f.title.slice(0, 140),
+    title: f.title.slice(0, TITLE_MAX),
     body: `${f.body}\n\n— Compare with Figma · ${f.rule} · ${f.severity}${f.figmaName ? ` · layer “${f.figmaName}”` : ""}`.slice(0, 5000),
     anchor: {
       selector: f.sel || null,
