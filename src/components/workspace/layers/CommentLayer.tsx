@@ -5,6 +5,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { isUnread, useStore, threadRoots, repliesOf } from "@/lib/store";
 import { showsAt } from "@/lib/viewports";
 import { isDevComment } from "@/lib/figma/dev";
+import { devCommentShown } from "@/lib/settings";
 import { frame } from "@/lib/frame/controller";
 import { api } from "@/lib/api";
 import type { Comment } from "@/lib/types";
@@ -79,6 +80,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   const showResolved = useStore((s) => s.showResolved);
   const activeThread = useStore((s) => s.activeThread);
   const showDevComments = useStore((s) => s.showDevComments);
+  const settings = useStore((s) => s.settings);
   // while a screen recording runs the markup steps aside (it stays mounted so drafts survive)
   const recording = useStore((s) => Boolean(s.recording));
   const draft = useStore((s) => s.draft);
@@ -95,7 +97,9 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
 
   const placed: Placed[] = useMemo(() => {
     void layoutTick; // re-place pins whenever the page layout changes
-    const roots = threadRoots(comments).filter((c) => showsAt(c, viewport) && (showResolved || !c.resolved || c.id === activeThread) && (showDevComments || !isDevComment(c) || c.id === activeThread));
+    // developer pins follow the panel toggle and the account's category / severity choice; the open thread always stays
+    const devShown = (c: Comment) => !isDevComment(c) || c.id === activeThread || (showDevComments && devCommentShown(c.anchor?.dev, settings));
+    const roots = threadRoots(comments).filter((c) => showsAt(c, viewport) && (showResolved || !c.resolved || c.id === activeThread) && devShown(c));
     return roots
       .map((c) => {
         if (!c.anchor) return null;
@@ -108,7 +112,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
       })
       .filter(Boolean) as Placed[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.user_id, showDevComments]);
+  }, [comments, viewport, showResolved, activeThread, layoutTick, readAt, viewer.user_id, showDevComments, settings]);
 
   // scroll to the active thread's pin when it's opened from the panel / permalink
   useEffect(() => {

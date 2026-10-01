@@ -18,6 +18,29 @@ export interface Profile {
   updated_at: string;
 }
 
+/** Per-account preferences (stored as JSON; every field optional so old rows keep working). */
+export interface UserSettings {
+  /** "Compare with Figma": categories of developer comments to show (see lib/figma/categories); missing = all */
+  devCategories?: string[];
+  /** severities of developer comments to show; missing = all */
+  devSeverities?: ("high" | "medium" | "low")[];
+}
+
+/** The account's paid plan, mirrored from Stripe by the webhook. One row per user. */
+export interface Subscription {
+  user_id: string;
+  plan: "free" | "pro" | "team";
+  /** Stripe subscription status (active, trialing, past_due, canceled, …); "none" when never subscribed */
+  status: string;
+  interval: "month" | "year" | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  price_id: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  updated_at: string;
+}
+
 export interface Project {
   id: string; // short slug used in URLs
   name: string;

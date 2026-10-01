@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
 import { readJson } from "@/lib/body";
+import { assertCanCompareFigma } from "@/lib/billing/entitlements";
 import { newId } from "@/lib/util";
 import { compare, summarize, TITLE_MAX, type Finding } from "@/lib/figma/compare";
 import { fetchFigmaSpec, FigmaError } from "@/lib/figma/fetch";
@@ -29,7 +30,9 @@ interface Body {
  */
 export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/figma-compare">) => {
   const { id } = await ctx.params;
-  const { review } = await reviewAccess(id, "edit");
+  const { user, review } = await reviewAccess(id, "edit");
+  // Runs count against the project owner's monthly allowance.
+  const { ownerId } = await assertCanCompareFigma(review.project_id as string, user.id);
   const body = await readJson<Body>(req, 24 * 1024 * 1024);
   if (!body?.figmaUrl || !body.snapshot?.nodes?.length) throw new HttpError(400, "Send the Figma link and a page snapshot.");
   const link = parseFigmaUrl(body.figmaUrl);
@@ -46,6 +49,7 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/rev
   const findings = compare(spec, body.snapshot);
 
   const d = await db();
+  await d.recordFigmaRun(ownerId, id, new Date().toISOString());
   const existing = (await d.listComments(id)).filter((c) => c.parent_id === null && isDevComment(c));
   const keepByFp = new Map<string, Comment>();
   for (const c of existing) if (c.anchor?.dev?.fingerprint) keepByFp.set(c.anchor.dev.fingerprint, c);

@@ -1,4 +1,4 @@
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
+import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Storage adapter. Two implementations:
@@ -10,6 +10,17 @@ export interface DbAdapter {
   getProfile(id: string): Promise<Profile | null>;
   getProfilesByIds(ids: string[]): Promise<Profile[]>;
   upsertProfile(p: Profile): Promise<Profile>;
+  /** per-account preferences (own table, so a missing migration only affects settings) */
+  getSettings(userId: string): Promise<UserSettings>;
+  putSettings(userId: string, settings: UserSettings): Promise<void>;
+
+  /* billing (mirrored from Stripe) */
+  getSubscription(userId: string): Promise<Subscription | null>;
+  getSubscriptionByCustomer(stripeCustomerId: string): Promise<Subscription | null>;
+  upsertSubscription(s: Subscription): Promise<Subscription>;
+  /** how many "Compare with Figma" runs the account made since `sinceIso` */
+  countFigmaRuns(userId: string, sinceIso: string): Promise<number>;
+  recordFigmaRun(userId: string, reviewId: string, atIso: string): Promise<void>;
 
   /* projects & membership */
   createProject(p: Project, owner: string): Promise<Project>;

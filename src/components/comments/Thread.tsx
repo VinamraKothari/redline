@@ -10,6 +10,7 @@ import { cn, timeAgo } from "@/lib/util";
 import { KIND_LABEL, KIND_ORDER, kindOf, kindsInRange, rangeForKinds, viewportLabel, viewportRange, type ViewportKind } from "@/lib/viewports";
 import { clock } from "@/lib/recorder";
 import { isDevComment } from "@/lib/figma/dev";
+import { categoryOf } from "@/lib/figma/categories";
 import { CommentBody } from "./CommentBody";
 import { Composer, EMOJIS } from "./Composer";
 
@@ -264,11 +265,16 @@ export function Thread({ rootId, onClose, inPanel }: { rootId: string; onClose?:
   return (
     <div className={cn("flex max-h-[70vh] flex-col", inPanel ? "" : "w-[340px]")}>
       {isDevComment(root) && root.anchor?.dev && (
-        <div className="flex items-center gap-2 border-b border-line bg-[#7c3aed]/6 px-3 py-1.5 text-[11px] text-[#7c3aed]">
-          <GitCompareArrows size={12} />
-          <span className="font-semibold uppercase tracking-wider">Developer comment</span>
-          <span className="text-ink-3">· {root.anchor.dev.rule} · {root.anchor.dev.severity}</span>
-          <a href={root.anchor.dev.figmaUrl} target="_blank" rel="noreferrer" className="ml-auto underline decoration-[#7c3aed]/40 underline-offset-2" title="Open the Figma frame this was compared with">
+        <div
+          className="flex items-center gap-2 border-b border-line bg-[#7c3aed]/6 px-3 py-1.5 text-[11px] text-[#7c3aed]"
+          data-dev-thread={categoryOf(root.anchor.dev.rule).id}
+          title={`Developer comment from Compare with Figma · rule: ${root.anchor.dev.rule}`}
+        >
+          <GitCompareArrows size={12} className="shrink-0" aria-label="Developer comment" />
+          {/* the icon and the violet chip already say "developer comment"; the category and severity get the room */}
+          <span className="min-w-0 truncate rounded bg-[#7c3aed]/12 px-1.5 py-px font-semibold">{categoryOf(root.anchor.dev.rule).label}</span>
+          <span className="shrink-0 text-ink-3">· {root.anchor.dev.severity}</span>
+          <a href={root.anchor.dev.figmaUrl} target="_blank" rel="noreferrer" className="ml-auto shrink-0 underline decoration-[#7c3aed]/40 underline-offset-2" title="Open the Figma frame this was compared with">
             Figma
           </a>
         </div>

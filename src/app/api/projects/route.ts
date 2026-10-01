@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, requireUser, syncProfile } from "@/lib/auth/server";
+import { assertCanCreateProject } from "@/lib/billing/entitlements";
 import type { Project } from "@/lib/types";
 import { newSlug } from "@/lib/util";
 
@@ -21,6 +22,7 @@ export const POST = guarded(async (req: NextRequest) => {
   const body = (await req.json().catch(() => ({}))) as { name?: string };
   const name = (body.name || "").trim().slice(0, 80);
   if (!name) return Response.json({ error: "Give the project a name." }, { status: 400 });
+  await assertCanCreateProject(user.id);
   const now = new Date().toISOString();
   const project: Project = { id: newSlug(), name, created_by: user.id, created_at: now, updated_at: now };
   const d = await db();

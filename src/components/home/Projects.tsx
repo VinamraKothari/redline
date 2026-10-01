@@ -10,6 +10,7 @@ import { cn, timeAgo } from "@/lib/util";
 import { Logo } from "@/components/Logo";
 import { Button, IconButton, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
 import { AccountMenu, useMe } from "./AccountMenu";
+import { SettingsDialogHost } from "@/components/settings/SettingsDialog";
 
 export function Projects() {
   const router = useRouter();
@@ -44,6 +45,7 @@ export function Projects() {
 
   return (
     <main className="relative h-full overflow-y-auto overflow-x-hidden">
+      <SettingsDialogHost />
       <div className="pointer-events-none absolute inset-0 canvas-grid opacity-60" />
       <div className="relative mx-auto flex min-h-full max-w-[880px] flex-col px-6 pb-10 pt-8">
         <header className="flex items-center justify-between">

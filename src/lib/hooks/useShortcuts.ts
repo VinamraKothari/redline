@@ -85,6 +85,11 @@ export function useShortcuts() {
         window.dispatchEvent(new CustomEvent("redline:share"));
         return;
       }
+      // account settings are personal, so the comma works in view-only mode too
+      if (k === "," && !e.shiftKey && !e.altKey) {
+        window.dispatchEvent(new CustomEvent("redline:settings"));
+        return;
+      }
 
       if (st.viewOnly) {
         if (k === "f") st.set({ fullscreen: !st.fullscreen });

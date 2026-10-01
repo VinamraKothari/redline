@@ -206,3 +206,90 @@ input:focus-visible, textarea:focus-visible { outline: none; }
 .measure-ext { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 3; shape-rendering: crispEdges; opacity: .8; }
 
 textarea { resize: none; }
+
+/* ─── Marketing pages ───────────────────────────────────────────────────────
+   The site around the app (landing, pricing, how it works, legal). Same paper
+   and ink, slightly larger type. Additions only — the app's tokens above stay
+   as they are. */
+:root {
+  --violet: #7c3aed;                       /* developer comments */
+  --violet-soft: rgba(124, 58, 237, 0.10);
+  --paper-glass: rgba(246, 245, 241, 0.84); /* the sticky nav lets the page show through */
+}
+@theme inline {
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+}
+
+.mk-nav {
+  background: var(--paper-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mk-nav { background: var(--paper); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+.mk-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+/* headings without a one-word last line */
+.mk-balance { text-wrap: balance; }
+
+/* key caps large enough to read on a phone (the app's .kbd is tooltip-sized) */
+.mk-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  font-family: var(--font-mono), monospace; font-size: 12px; line-height: 1;
+  border-radius: 5px; background: var(--panel); color: var(--ink-2);
+  border: 1px solid var(--line); border-bottom-width: 2px;
+}
+
+/* a table that scrolls sideways on phones: the row labels stay put */
+.mk-sticky-col {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--panel);
+  box-shadow: 1px 0 0 var(--line);
+}
+@media (max-width: 639px) {
+  .mk-sticky-col { width: 150px; max-width: 150px; }
+}
+
+/* cards that answer the pointer without jumping */
+.mk-lift { transition: transform 200ms var(--ease-spring), box-shadow 200ms var(--ease-spring); }
+.mk-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop); }
+
+/* the mock review in the hero: a dotted canvas like the real one, and grey
+   bars standing in for the reviewed page's content */
+.mk-canvas {
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--line-strong) 0.8px, transparent 0.8px);
+  background-size: 14px 14px;
+}
+.mk-bar { background: var(--line); border-radius: 3px; }
+.mk-bar-ink { background: var(--ink); opacity: 0.85; border-radius: 3px; }
+
+/* FAQ: native <details>, with our own chevron instead of the browser marker */
+.mk-faq summary { list-style: none; cursor: pointer; }
+.mk-faq summary::-webkit-details-marker { display: none; }
+.mk-faq details[open] .mk-faq-chevron { transform: rotate(180deg); }
+
+/* long-form pages: legal texts and the changelog */
+.mk-prose { font-size: 15px; line-height: 1.65; color: var(--ink-2); }
+.mk-prose h2 { margin-top: 2.4em; font-size: 20px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; color: var(--ink); text-wrap: balance; }
+.mk-prose h3 { margin-top: 1.6em; font-size: 15px; font-weight: 600; color: var(--ink); }
+.mk-prose > :first-child { margin-top: 0; }
+.mk-prose h2 + p, .mk-prose h3 + p { margin-top: 0.5em; }
+.mk-prose p { margin-top: 0.9em; }
+.mk-prose ul, .mk-prose ol { margin-top: 0.9em; padding-left: 1.3em; }
+.mk-prose ul { list-style: disc; }
+.mk-prose ol { list-style: decimal; }
+.mk-prose li { margin-top: 0.35em; padding-left: 0.2em; }
+.mk-prose li::marker { color: var(--ink-3); }
+.mk-prose strong { font-weight: 600; color: var(--ink); }
+.mk-prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; transition: text-decoration-color 120ms ease-out; }
+.mk-prose a:hover { text-decoration-color: var(--red); }
+.mk-prose code { font-family: var(--font-mono), monospace; font-size: 0.88em; padding: 1px 5px; border-radius: 4px; background: var(--hover); color: var(--ink); }
+.mk-prose .mk-placeholder { color: var(--red-ink); background: var(--red-soft); padding: 0 4px; border-radius: 4px; font-family: var(--font-mono), monospace; font-size: 0.88em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-lift:hover { transform: none; }
+}

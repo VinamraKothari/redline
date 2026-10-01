@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, Viewer } from "./types";
+import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, UserSettings, Viewer } from "./types";
 import type { PublicReview } from "./review";
 import type { ElementInfo, Rect } from "./frame/dom";
 
@@ -42,6 +42,8 @@ interface State {
   shapes: Shape[];
   /** the signed-in account (null until /api/me answered) */
   me: Profile | null;
+  /** the account's preferences (see lib/settings); {} until they are loaded */
+  settings: UserSettings;
   viewer: Viewer;
   viewers: Viewer[]; // others present
 
@@ -105,6 +107,7 @@ interface State {
   /** flag a thread to come back to — it shows as unread until opened again */
   markUnread: (threadId: string) => void;
   markAllRead: () => void;
+  setSettings: (s: UserSettings) => void;
 }
 
 const READ_KEY = "redline:read:";
@@ -120,6 +123,7 @@ export const useStore = create<State>((set, get) => ({
   comments: [],
   shapes: [],
   me: null,
+  settings: {},
   viewer: initialViewer(),
   viewers: [],
 
@@ -214,6 +218,7 @@ export const useStore = create<State>((set, get) => ({
     });
     saveReads(get);
   },
+  setSettings: (settings) => set({ settings }),
 }));
 
 /** Read marks are ISO times; an unread mark is "!" + the time it was set. The later mark wins. */

@@ -3,6 +3,8 @@
 import { PanelRightClose } from "lucide-react";
 import { IconButton, Segmented, Tip } from "@/components/ui/primitives";
 import { useStore } from "@/lib/store";
+import { isDevComment } from "@/lib/figma/dev";
+import { devCommentShown } from "@/lib/settings";
 import { CommentsPanel } from "./CommentsPanel";
 import { InspectPanel } from "./InspectPanel";
 
@@ -10,7 +12,9 @@ export function RightPanel() {
   const panel = useStore((s) => s.panel);
   const set = useStore((s) => s.set);
   const comments = useStore((s) => s.comments);
-  const pending = comments.filter((c) => !c.parent_id && !c.resolved).length;
+  const settings = useStore((s) => s.settings);
+  // developer threads the account's settings hide don't count as open work
+  const pending = comments.filter((c) => !c.parent_id && !c.resolved && (!isDevComment(c) || devCommentShown(c.anchor?.dev, settings))).length;
 
   return (
     <aside className="z-20 flex w-[320px] shrink-0 flex-col border-l border-line bg-paper">

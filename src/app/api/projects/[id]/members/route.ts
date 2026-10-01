@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, projectAccess } from "@/lib/auth/server";
+import { assertCanInvite } from "@/lib/billing/entitlements";
 import type { ProjectInvite, Role } from "@/lib/types";
 import { newId } from "@/lib/util";
 
@@ -19,11 +20,14 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/pro
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Response.json({ error: "Enter a valid e-mail address." }, { status: 400 });
   const role = isRole(body.role) ? body.role : "edit";
   const d = await db();
+  // Re-inviting someone already in (or already invited) doesn't take a seat.
+  const members = await d.listMembers(id);
+  const known = members.find((m) => m.profile?.email?.toLowerCase() === email);
+  const pending = (await d.listInvites(id)).some((i) => !i.accepted_at && i.email.toLowerCase() === email);
+  if (!known && !pending) await assertCanInvite(id, user.id);
   const invite: ProjectInvite = { id: newId(), project_id: id, email, role, invited_by: user.id, created_at: new Date().toISOString(), accepted_at: null };
   await d.upsertInvite(invite);
   // If that Google account already exists, membership applies right away.
-  const members = await d.listMembers(id);
-  const known = members.find((m) => m.profile?.email?.toLowerCase() === email);
   if (known) {
     await d.setMember(id, known.user_id, role);
     await d.deleteInvite(invite.id);

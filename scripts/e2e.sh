@@ -7,6 +7,6 @@ pkill -f "http.server 3999" 2>/dev/null || true
 rm -rf .data
 npm run build >/tmp/redline-build.log 2>&1 || { tail -40 /tmp/redline-build.log; exit 1; }
 (cd tests/fixtures && python3 -m http.server 3999 >/tmp/fixture.log 2>&1 &)
-PORT=3123 REDLINE_ALLOW_LOCAL=1 REDLINE_TEST_AUTH=1 npm run start >/tmp/redline-server.log 2>&1 &
+export STRIPE_WEBHOOK_SECRET=whsec_redline_test; PORT=3123 REDLINE_ALLOW_LOCAL=1 REDLINE_TEST_AUTH=1 REDLINE_BILLING_FAKE=1 STRIPE_SECRET_KEY=sk_test_dummy STRIPE_API_BASE=http://localhost:3999 npm run start >/tmp/redline-server.log 2>&1 &
 sleep 4
 PW_CHROMIUM="${PW_CHROMIUM:-}" npx playwright test "$@"

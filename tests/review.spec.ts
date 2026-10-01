@@ -411,10 +411,10 @@ test("client apps hydrate: relative fetch/XHR, dynamic chunks and module imports
   expect(bundler.attr).toBe("/app.js");
   expect(bundler.started).toBe(true);
   // the document's own URL is the site's path on our origin (not /api/proxy?url=…)
-  expect(bundler.base).toBe("http://localhost:3123/spa.html");
+  expect(bundler.base).toBe(`${new URL(page.url()).origin}/spa.html`);
   // images/links were made absolute to the site instead
   const img = await frame.locator("img").first().getAttribute("src");
-  expect(img).toMatch(/^http:\/\/localhost:3999\//);
+  expect(img?.startsWith(new URL(FIXTURE).origin + "/")).toBe(true);
 });
 
 test("read / unread: another member's reply flags the thread, U toggles, mark all read, state syncs via the account", async ({ page, browser }) => {

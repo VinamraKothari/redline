@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
+import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 const BUCKET = "snapshots";
 const THUMBS = "thumbnails";
@@ -34,6 +34,39 @@ export const supabaseDb: DbAdapter = {
   },
   async upsertProfile(p) {
     return must(await sb().from("profiles").upsert(p).select().single<Profile>());
+  },
+  async getSettings(userId) {
+    const { data, error } = await sb().from("user_settings").select("settings").eq("user_id", userId).maybeSingle<{ settings: UserSettings }>();
+    if (error) return {};
+    return data?.settings ?? {};
+  },
+  async putSettings(userId, settings) {
+    const { error } = await sb().from("user_settings").upsert({ user_id: userId, settings, updated_at: new Date().toISOString() });
+    if (error) throw new Error(/user_settings/.test(error.message) ? "Settings storage is not set up yet (run migration 005)." : error.message);
+  },
+
+  /* billing */
+  async getSubscription(userId) {
+    const { data, error } = await sb().from("subscriptions").select().eq("user_id", userId).maybeSingle<Subscription>();
+    if (error) return null;
+    return data ?? null;
+  },
+  async getSubscriptionByCustomer(customerId) {
+    const { data, error } = await sb().from("subscriptions").select().eq("stripe_customer_id", customerId).maybeSingle<Subscription>();
+    if (error) return null;
+    return data ?? null;
+  },
+  async upsertSubscription(sub) {
+    return must(await sb().from("subscriptions").upsert(sub).select().single<Subscription>());
+  },
+  async countFigmaRuns(userId, sinceIso) {
+    const { count, error } = await sb().from("figma_runs").select("*", { count: "exact", head: true }).eq("user_id", userId).gte("at", sinceIso);
+    if (error) return 0;
+    return count ?? 0;
+  },
+  async recordFigmaRun(userId, reviewId, atIso) {
+    const { error } = await sb().from("figma_runs").insert({ user_id: userId, review_id: reviewId, at: atIso });
+    if (error && !/figma_runs/.test(error.message)) throw new Error(error.message);
   },
 
   /* projects & membership */

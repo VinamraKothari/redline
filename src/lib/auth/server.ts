@@ -26,8 +26,22 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** extra JSON fields for the response body, when the client needs more than the message */
+    public extra?: Record<string, unknown>,
   ) {
     super(message);
+  }
+}
+
+/**
+ * A 402 the client can act on: the body carries `upgrade: true`, the plan that
+ * lifts the limit, the feature that hit it and whether the caller owns the
+ * plan in question (limits follow the project owner), so `lib/api.ts` can
+ * open the upgrade dialog from any screen with the right wording.
+ */
+export class PaywallError extends HttpError {
+  constructor(message: string, plan: "pro" | "team", feature: string, who: { owner: boolean; ownerName?: string }) {
+    super(402, message, { upgrade: true, plan, feature, ...who });
   }
 }
 
@@ -139,7 +153,7 @@ export function guarded<A extends unknown[]>(fn: (...a: A) => Promise<Response>)
     try {
       return await fn(...a);
     } catch (e) {
-      if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+      if (e instanceof HttpError) return Response.json({ error: e.message, ...e.extra }, { status: e.status });
       console.error("[redline] route failed", e);
       return Response.json({ error: (e as Error).message || "Something went wrong." }, { status: 500 });
     }

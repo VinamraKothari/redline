@@ -20,14 +20,16 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase-config";
  *    proxy sets on every reviewed page.
  */
 
-const PAGE = /^\/(?:$|p\/|r\/|start$|login$)/;
+/** Redline's own pages: the app, the account, and the marketing site around them (see src/app/(marketing)) */
+const PAGE = /^\/(?:$|p\/|r\/|start$|login$|pricing$|how-it-works$|changelog$|privacy$|terms$|imprint$|account(?:\/|$)|robots\.txt$|sitemap\.xml$)/;
 /** pages a signed-out visitor may see (the landing page decides what to render) */
-const PUBLIC_PAGE = /^\/(?:$|login$)/;
+const PUBLIC_PAGE = /^\/(?:$|login$|pricing$|how-it-works$|changelog$|privacy$|terms$|imprint$|robots\.txt$|sitemap\.xml$)/;
 const OWN_PREFIXES = [
   "/api/",
   "/auth/",
   "/r/",
   "/p/",
+  "/account/",
   "/start",
   "/login",
   "/bridge.js",

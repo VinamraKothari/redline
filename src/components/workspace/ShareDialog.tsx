@@ -82,7 +82,8 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       else download(`${safe}-${viewport}-png.zip`, zip(files));
       toast(files.length === 1 ? "PNG downloaded." : `${files.length} PNG sections downloaded as a zip (numbered top to bottom).`, "success");
     } catch (e) {
-      toast(`PNG export failed: ${(e as Error).message || "unknown error"}`, "error");
+      // a 402 has already opened the upgrade dialog; anything else is worth a toast
+      if ((e as Error).name !== "PaywallRejected") toast(`PNG export failed: ${(e as Error).message || "unknown error"}`, "error");
     } finally {
       setBusy(false);
       setPhase(null);

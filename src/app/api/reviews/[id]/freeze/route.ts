@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { readJson } from "@/lib/body";
 import { guarded, reviewAccess } from "@/lib/auth/server";
+import { assertCanFreeze } from "@/lib/billing/entitlements";
 import { publicReview } from "@/lib/review";
 
 export const runtime = "nodejs";
@@ -9,7 +10,8 @@ export const runtime = "nodejs";
 /** POST { html } — store a snapshot of the rendered page and switch the review to it (edit role). */
 export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/freeze">) => {
   const { id } = await ctx.params;
-  const { user, role } = await reviewAccess(id, "edit");
+  const { user, review, role } = await reviewAccess(id, "edit");
+  await assertCanFreeze(review.project_id as string, user.id);
   const html = (await readJson<{ html?: string }>(req))?.html;
   if (!html || html.length < 100) return Response.json({ error: "Nothing to freeze." }, { status: 400 });
   if (html.length > 12 * 1024 * 1024) return Response.json({ error: "The page is too large to freeze (12 MB limit)." }, { status: 413 });

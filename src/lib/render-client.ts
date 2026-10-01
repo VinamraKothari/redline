@@ -5,6 +5,7 @@ import { showsAt } from "./viewports";
 import { serializeDocument } from "./frame/dom";
 import { threadOrder } from "./export";
 import { useStore } from "./store";
+import { call } from "./api";
 import type { Comment } from "./types";
 
 /**
@@ -68,15 +69,12 @@ export async function renderOnServer(kind: "png" | "jira", opts: { warm?: boolea
   const html = serializeDocument(doc, st.review.url);
   const payload = JSON.stringify({ kind, html, width: st.viewport, pins: currentPins(st.comments, st.viewport), overlaySvg: overlaySvg() });
   const { body, gz } = await gzip(payload);
-  const res = await fetch(`/api/reviews/${st.review.id}/render`, {
+  // through lib/api's call() so a plan limit (402) opens the upgrade dialog like everywhere else
+  return call<RenderResult>(`/api/reviews/${st.review.id}/render`, {
     method: "POST",
     headers: { "content-type": gz ? "application/octet-stream" : "application/json", ...(gz ? { "x-redline-gzip": "1" } : {}) },
     body,
-    credentials: "same-origin",
   });
-  const data = (await res.json().catch(() => ({}))) as RenderResult & { error?: string };
-  if (!res.ok) throw new Error(data.error || (res.status === 413 ? "The page is too large to render." : `Rendering failed (${res.status}).`));
-  return data;
 }
 
 /* ─── a tiny "store only" ZIP writer (PNGs are already compressed) ────────── */

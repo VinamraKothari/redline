@@ -3,6 +3,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase-config";
+import { clearCachedSettings } from "@/lib/settings";
 
 /**
  * Browser-side Supabase client. Sessions are stored in cookies (not
@@ -32,5 +33,6 @@ export async function signOut(): Promise<void> {
   const sb = supabaseBrowser();
   await sb?.auth.signOut().catch(() => {});
   await fetch("/api/auth/test", { method: "DELETE" }).catch(() => {});
+  clearCachedSettings();
   window.location.href = "/login";
 }

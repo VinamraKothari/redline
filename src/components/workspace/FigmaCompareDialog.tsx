@@ -9,6 +9,7 @@ import { snapshotDocument, waitForImages } from "@/lib/figma/snapshot";
 import { parseFigmaUrl } from "@/lib/figma/spec";
 import { isDevComment } from "@/lib/figma/dev";
 import { useStore } from "@/lib/store";
+import { openSettings } from "@/components/settings/SettingsDialog";
 
 const LINK_KEY = "redline:figma:";
 
@@ -127,6 +128,20 @@ export function FigmaCompareDialog({ open, onOpenChange }: { open: boolean; onOp
           <ul className="list-disc space-y-1 pl-4 text-[11.5px] text-ink-3">
             <li>In Figma, select the whole page frame (the 1440px artboard), then Share → Copy link — the link must contain a node-id.</li>
             <li>Findings are written from a developer&apos;s point of view, in violet, and can be hidden with the Developer comments toggle in the panel. They export to the Jira CSV like any other thread.</li>
+            <li>
+              Each finding carries its category (typography, spacing, images…). You choose which categories and severities you see in{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenChange(false);
+                  openSettings();
+                }}
+                className="underline decoration-ink-3/40 underline-offset-2 hover:text-ink"
+              >
+                Settings
+              </button>
+              .
+            </li>
             <li>Running again refreshes the findings: outdated ones are removed, resolved ones and ones with replies are kept.</li>
           </ul>
           {configured === false && (

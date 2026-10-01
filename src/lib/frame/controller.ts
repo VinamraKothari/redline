@@ -122,8 +122,16 @@ export class FrameController {
     });
     mo.observe(doc.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "open"] });
 
-    // Keyboard events inside the frame should still drive our shortcuts.
+    // Keyboard events inside the frame should still drive our shortcuts —
+    // except what is typed into the page's own fields: forwarded events carry
+    // no target, so the shortcut handler can't tell "," in a search box from
+    // the Settings shortcut. Modifier keys still pass so deep-select tracks
+    // them; Escape leaves the field, like in Redline's own inputs.
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = Boolean(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable));
+      if (typing && e.key === "Escape" && e.type === "keydown") t?.blur();
+      if (typing && e.key !== "Control" && e.key !== "Meta") return;
       const clone = new KeyboardEvent(e.type, e);
       window.dispatchEvent(clone);
     };

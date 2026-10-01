@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape } from "@/lib/types";
+import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Development fallback: a single JSON file under .data/.
@@ -17,9 +17,12 @@ interface Store {
   members: Record<string, ProjectMember>; // key: project_id/user_id
   invites: Record<string, ProjectInvite>;
   reads: Record<string, Record<string, string>>; // key: user_id/review_id
+  settings: Record<string, UserSettings>; // key: user_id
+  subscriptions: Record<string, Subscription>; // key: user_id
+  figmaRuns: { user_id: string; review_id: string; at: string }[];
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {} });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [] });
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -70,6 +73,38 @@ const impl: DbAdapter = {
     s.profiles[p.id] = p;
     await persist();
     return p;
+  },
+  async getSettings(userId) {
+    return (await load()).settings[userId] ?? {};
+  },
+  async putSettings(userId, settings) {
+    const s = await load();
+    s.settings[userId] = settings;
+    await persist();
+  },
+
+  /* billing */
+  async getSubscription(userId) {
+    return (await load()).subscriptions[userId] ?? null;
+  },
+  async getSubscriptionByCustomer(customerId) {
+    const s = await load();
+    return Object.values(s.subscriptions).find((x) => x.stripe_customer_id === customerId) ?? null;
+  },
+  async upsertSubscription(sub) {
+    const s = await load();
+    s.subscriptions[sub.user_id] = sub;
+    await persist();
+    return sub;
+  },
+  async countFigmaRuns(userId, sinceIso) {
+    const s = await load();
+    return s.figmaRuns.filter((r) => r.user_id === userId && r.at >= sinceIso).length;
+  },
+  async recordFigmaRun(userId, reviewId, atIso) {
+    const s = await load();
+    s.figmaRuns.push({ user_id: userId, review_id: reviewId, at: atIso });
+    await persist();
   },
 
   /* projects & membership */

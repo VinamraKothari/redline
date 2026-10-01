@@ -1,11 +1,20 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
+import { assertCanRecord } from "@/lib/billing/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_RECORDING_BYTES = 60 * 1024 * 1024;
+
+/** GET — may this person record here? 402 (with the upgrade details) before a single frame is captured. */
+export const GET = guarded(async (_req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/recordings">) => {
+  const { id } = await ctx.params;
+  const { user, review } = await reviewAccess(id, "edit");
+  await assertCanRecord(review.project_id as string, user.id);
+  return Response.json({ ok: true });
+});
 
 /**
  * POST { type, size } → where to PUT a screen recording and the public URL it
@@ -14,7 +23,8 @@ const MAX_RECORDING_BYTES = 60 * 1024 * 1024;
  */
 export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/recordings">) => {
   const { id } = await ctx.params;
-  await reviewAccess(id, "edit");
+  const { user, review } = await reviewAccess(id, "edit");
+  await assertCanRecord(review.project_id as string, user.id);
   const body = (await req.json().catch(() => ({}))) as { type?: string; size?: number };
   const type = String(body.type || "");
   const size = Number(body.size) || 0;

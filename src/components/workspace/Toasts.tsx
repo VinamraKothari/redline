@@ -10,7 +10,7 @@ import { cancelRecording, clock, MAX_SECONDS, stopRecording } from "@/lib/record
 /** The floating "● 0:07 · Stop" pill while a screen recording runs. */
 function RecordingBar() {
   const recording = useStore((s) => s.recording);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!recording) return;
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -93,6 +93,7 @@ export function Toasts() {
               ["Save this state as a new page", "⇧ P"],
               ["Compare with Figma", "⇧ G"],
               ["Share & export", "⇧ S"],
+              ["Settings", ","],
               ["Reload the page", "R"],
               ["Site scripts on / off", "⇧ J"],
               ["Viewport: desktop / tablet / phone", "1 / 2 / 3"],

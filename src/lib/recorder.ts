@@ -2,6 +2,7 @@
 
 import { useStore, type Mode } from "./store";
 import type { Attachment } from "./types";
+import { api } from "./api";
 
 /**
  * Screen recordings for comments. Records this tab (the browser's picker
@@ -43,6 +44,18 @@ export async function startRecording(target: string): Promise<void> {
     return;
   }
   starting = true;
+  // Recordings are a paid feature of the project's owner: find out before a
+  // single frame is captured, so nobody records two minutes for nothing.
+  // A 402 opens the upgrade dialog by itself; anything else is a toast.
+  if (st.review) {
+    try {
+      await api.canRecord(st.review.id);
+    } catch (e) {
+      if ((e as Error).name !== "PaywallRejected") st.toast((e as Error).message, "error");
+      starting = false;
+      return;
+    }
+  }
   let picked: MediaStream;
   try {
     picked = await navigator.mediaDevices.getDisplayMedia({
@@ -142,14 +155,7 @@ async function finish(target: string, rec: MediaRecorder, parts: Blob[]) {
   if (!reviewId) return;
   useStore.setState({ uploading: { target, progress: 0 } });
   try {
-    const res = await fetch(`/api/reviews/${reviewId}/recordings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, size: blob.size }),
-      credentials: "same-origin",
-    });
-    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Couldn't prepare the upload.");
-    const { id, uploadUrl, headers, url } = (await res.json()) as { id: string; uploadUrl: string; headers: Record<string, string>; url: string };
+    const { id, uploadUrl, headers, url } = await api.createRecordingUpload(reviewId, type, blob.size);
     await putWithProgress(uploadUrl, headers, blob, (p) => useStore.setState({ uploading: { target, progress: p } }));
     const attachment: Attachment = {
       id,
@@ -164,7 +170,7 @@ async function finish(target: string, rec: MediaRecorder, parts: Blob[]) {
     useStore.setState({ uploading: null, pendingRecording: { target, attachment } });
   } catch (e) {
     useStore.setState({ uploading: null });
-    st.toast((e as Error).message || "Couldn't upload the recording.", "error");
+    if ((e as Error).name !== "PaywallRejected") st.toast((e as Error).message || "Couldn't upload the recording.", "error");
   }
 }
 

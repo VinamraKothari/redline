@@ -13,6 +13,7 @@ import { RightPanel } from "./panels/RightPanel";
 import { DrawToolbar } from "./DrawToolbar";
 import { Toasts } from "./Toasts";
 import { useMe } from "@/components/home/AccountMenu";
+import { SettingsDialogHost } from "@/components/settings/SettingsDialog";
 import { useShortcuts } from "@/lib/hooks/useShortcuts";
 import { cn } from "@/lib/util";
 import { PanelRightOpen } from "lucide-react";
@@ -106,6 +107,8 @@ export function Workspace({
         </div>
         {mode === "draw" && !fullscreen && <DrawToolbar />}
         <Toasts />
+        {/* outlives the top bar, so Settings works in full-screen mode too */}
+        <SettingsDialogHost />
       </div>
     </TooltipProvider>
   );

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, reviewAccess } from "@/lib/auth/server";
+import { assertCanAddPage } from "@/lib/billing/entitlements";
 import type { Review } from "@/lib/types";
 import { publicReview } from "@/lib/review";
 
@@ -30,6 +31,8 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/re
   if (typeof body.project_id === "string" && body.project_id !== review.project_id) {
     const targetRole = await d.memberRole(body.project_id, user.id);
     if (!targetRole || targetRole === "view") return Response.json({ error: "You need edit access to the project you're moving this page to." }, { status: 403 });
+    // …and room under that project's plan, like any other new page there.
+    await assertCanAddPage(body.project_id, review.mode, user.id);
     patch.project_id = body.project_id;
     await d.updateProject(body.project_id, {});
   }

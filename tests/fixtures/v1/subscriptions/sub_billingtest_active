@@ -1,0 +1,37 @@
+{
+  "id": "sub_billingtest_active",
+  "object": "subscription",
+  "status": "active",
+  "customer": "cus_billingtest",
+  "cancel_at_period_end": false,
+  "metadata": {},
+  "created": 1700000000,
+  "items": {
+    "object": "list",
+    "data": [
+      {
+        "id": "si_sub_billingtest_active",
+        "object": "subscription_item",
+        "current_period_end": 1793388692,
+        "current_period_start": 1790796692,
+        "quantity": 1,
+        "price": {
+          "id": "price_redline_team_month",
+          "object": "price",
+          "active": true,
+          "currency": "eur",
+          "lookup_key": "redline_team_month",
+          "product": "prod_team",
+          "recurring": {
+            "interval": "month",
+            "interval_count": 1
+          },
+          "unit_amount": 4900,
+          "metadata": {}
+        }
+      }
+    ],
+    "has_more": false,
+    "url": "/v1/subscription_items?subscription=sub_billingtest_active"
+  }
+}

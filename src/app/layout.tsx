@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { UpgradeDialogHost } from "@/components/billing/UpgradeDialog";
 
 // Self-hosted (OFL) so builds never depend on Google Fonts being reachable.
 const ui = localFont({
@@ -38,7 +39,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${ui.variable} ${mono.variable} h-full`}>
-      <body className="h-full">{children}</body>
+      <body className="h-full">
+        {children}
+        {/* opens on any 402 from the API — see lib/api.ts */}
+        <UpgradeDialogHost />
+      </body>
     </html>
   );
 }

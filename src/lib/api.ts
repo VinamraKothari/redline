@@ -1,9 +1,35 @@
 "use client";
 
-import type { Anchor, Attachment, Comment, Profile, Project, ProjectInvite, ProjectMember, Role, Shape } from "./types";
+import type { Anchor, Attachment, Comment, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
 import type { PublicReview } from "./review";
+import type { Interval, PlanId } from "./billing/plans";
 
 export type ProjectSummary = Project & { role: Role; review_count: number; preview_urls: string[] };
+
+/** What a 402 from the API carries, and what the upgrade dialog receives via the `redline:paywall` event. */
+export interface PaywallDetail {
+  plan: Exclude<PlanId, "free">;
+  feature: string;
+  message: string;
+  /** false when the limit belongs to someone else's project — the owner has to upgrade, not the caller */
+  owner: boolean;
+  ownerName?: string;
+}
+
+/** The subscription as the browser sees it: no Stripe ids. */
+export type SubscriptionSummary = Pick<Subscription, "plan" | "status" | "interval" | "current_period_end" | "cancel_at_period_end"> & { paying: boolean };
+
+export interface BillingStatus {
+  plan: PlanId;
+  subscription: SubscriptionSummary | null;
+  usage: { projects: number; figmaRunsThisMonth: number };
+  stripeEnabled: boolean;
+}
+
+/** Thrown for a 402 after the upgrade dialog has been opened, so callers can skip their own error toast. */
+export class PaywallRejected extends Error {
+  name = "PaywallRejected";
+}
 
 const RETRY_STATUS = new Set([408, 425, 429, 502, 503, 504]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -14,6 +40,7 @@ function friendly(status: number): string {
   if (status === 429) return "Too many requests at once — please wait a moment.";
   if (status === 401) return "Your session has expired — sign in again.";
   if (status === 403) return "You don't have permission to do that.";
+  if (status === 402) return "This needs a paid plan.";
   if (status === 404) return "That no longer exists.";
   return `Request failed (${status})`;
 }
@@ -22,8 +49,10 @@ function friendly(status: number): string {
  * fetch + JSON with retries: transient network errors and gateway/rate-limit
  * responses are retried with a short back-off (two extra attempts), so a
  * blip never surfaces as an error to someone in the middle of a review.
+ * Exported for the few callers that build their own request body
+ * (render-client, recorder) so every 402 reaches the upgrade dialog.
  */
-async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
+export async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string>) };
   let attempt = 0;
   for (;;) {
@@ -43,10 +72,16 @@ async function call<T>(url: string, init: RequestInit = {}): Promise<T> {
       await sleep(500 * attempt * attempt);
       continue;
     }
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string; upgrade?: boolean; plan?: PaywallDetail["plan"]; feature?: string; owner?: boolean; ownerName?: string };
     if (res.status === 401 && typeof window !== "undefined") {
       // session gone: back to sign-in, then straight back here
       window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    }
+    if (res.status === 402 && data.upgrade && typeof window !== "undefined") {
+      // a plan limit: whichever screen we're on, the upgrade dialog takes it from here
+      const detail: PaywallDetail = { plan: data.plan || "pro", feature: data.feature || "", message: data.error || friendly(402), owner: data.owner !== false, ownerName: data.ownerName };
+      window.dispatchEvent(new CustomEvent<PaywallDetail>("redline:paywall", { detail }));
+      throw new PaywallRejected(detail.message);
     }
     if (!res.ok) throw new Error(data.error || friendly(res.status));
     return data;
@@ -193,5 +228,25 @@ export const api = {
   },
   freeze(reviewId: string, html: string) {
     return postJson<{ review: PublicReview }>(`/api/reviews/${reviewId}/freeze`, { html });
+  },
+  createRecordingUpload(reviewId: string, type: string, size: number) {
+    return call<{ id: string; uploadUrl: string; headers: Record<string, string>; url: string }>(`/api/reviews/${reviewId}/recordings`, { method: "POST", body: JSON.stringify({ type, size }) });
+  },
+  /** may the caller attach a screen recording here? (402 → upgrade dialog) */
+  canRecord(reviewId: string) {
+    return call<{ ok: true }>(`/api/reviews/${reviewId}/recordings`, { cache: "no-store" });
+  },
+
+  /* billing */
+  billing: {
+    status() {
+      return call<BillingStatus>("/api/billing/status", { cache: "no-store" });
+    },
+    checkout(plan: Exclude<PlanId, "free">, interval: Interval) {
+      return call<{ url: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) });
+    },
+    portal() {
+      return call<{ url: string }>("/api/billing/portal", { method: "POST" });
+    },
   },
 };

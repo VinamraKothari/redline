@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { readJson } from "@/lib/body";
 import { db } from "@/lib/db";
 import { guarded, HttpError, reviewAccess } from "@/lib/auth/server";
+import { assertCanExportPng } from "@/lib/billing/entitlements";
 import { screenshotsAvailable } from "@/lib/screenshot";
 import { cropAround, renderFull, sections, type RenderPin } from "@/lib/render";
 
@@ -28,12 +29,14 @@ interface Body {
  */
 export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/render">) => {
   const { id } = await ctx.params;
-  const { review } = await reviewAccess(id, "view");
+  const { user, review } = await reviewAccess(id, "view");
   if (!screenshotsAvailable()) throw new HttpError(501, "Rendering is not available on this server.");
 
   const body = await readJson<Body>(req, MAX_BODY);
   if (!body) throw new HttpError(400, "Bad render payload (or the page snapshot is too large).");
   if (!body || typeof body.html !== "string" || !body.html || !(body.kind === "png" || body.kind === "jira")) throw new HttpError(400, "Bad render payload.");
+  // PNG exports are a paid feature; the Jira crops stay free so the CSV export always works.
+  if (body.kind === "png") await assertCanExportPng(review.project_id as string, user.id);
   const width = Number(body.width) || review.default_viewport;
   const pins = (Array.isArray(body.pins) ? body.pins : [])
     .filter((p) => p && typeof p.id === "string" && Number.isFinite(p.x) && Number.isFinite(p.y))
