@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -108,6 +109,8 @@ export function Landing({ next, error, testMode }: { next: string; error: string
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(error);
   const [testName, setTestName] = useState("Priya Test");
+  // /?deleted=1 is where account deletion lands (both pages that render this are dynamic, so no Suspense boundary is needed)
+  const deleted = useSearchParams().get("deleted") === "1";
 
   const startTarget = () => {
     const n = normalizeUrl(url);
@@ -158,6 +161,11 @@ export function Landing({ next, error, testMode }: { next: string; error: string
           <div className="pointer-events-none absolute inset-0 canvas-grid opacity-50 [mask-image:linear-gradient(to_bottom,black_40%,transparent)]" />
           <Container className="relative grid items-center gap-12 py-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)] lg:gap-14 lg:py-24">
             <div className="max-w-[560px]">
+              {deleted && (
+                <p role="status" className="mb-6 inline-flex items-center gap-2 rounded-lg bg-panel px-3 py-2 text-[13px] text-ink hairline">
+                  <Check size={13} className="text-green" /> Your account was deleted. Thanks for using Redline — you can sign in again any time to start fresh.
+                </p>
+              )}
               <div className="mk-eyebrow">Design review for the web</div>
               <h1 className="mk-balance mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em] text-ink lg:text-[52px]">
                 Design feedback on{" "}

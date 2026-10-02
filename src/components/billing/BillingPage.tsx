@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, CreditCard, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CreditCard, FileText, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { api, type BillingStatus } from "@/lib/api";
 import { isInterval, isPaidPlan, PLAN_BY_ID, type Interval, type PlanId } from "@/lib/billing/plans";
 import { cn } from "@/lib/util";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/primitives";
 import { AccountMenu } from "@/components/home/AccountMenu";
+import { alsoPayingLine, formatDay, isComplimentary, planSource, planUntil } from "./plan-source";
 import { PlanPicker } from "./PlanPicker";
+import { UsageGrid } from "./UsageGrid";
 
 /**
  * /account/billing — the plan the account is on, what it has used, and the
@@ -94,7 +97,13 @@ export function BillingPage() {
 
   const planInfo = status ? PLAN_BY_ID[status.plan] : null;
   const sub = status?.subscription ?? null;
+  // a Stripe customer — current or past — has a portal with their invoices in it
   const paying = Boolean(sub?.paying);
+  const source = status ? planSource(status) : "free";
+  const complimentary = isComplimentary(source);
+  // a live paid subscription (the row's plan, not the effective one — a collaborator's row may say Pro while the account is on Team)
+  const subscribed = Boolean(sub && isPaidPlan(sub.plan) && ["active", "trialing", "past_due"].includes(sub.status));
+  const alsoPaying = complimentary && subscribed;
 
   return (
     <main className="relative h-full overflow-y-auto overflow-x-hidden">
@@ -106,7 +115,10 @@ export function BillingPage() {
         </header>
 
         <section className="mt-12">
-          <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-ink">Plan &amp; billing</h1>
+          <Link href="/account" className="inline-flex items-center gap-1 text-[12.5px] font-medium text-ink-2 hover:text-ink">
+            <ArrowLeft size={13} /> Account
+          </Link>
+          <h1 className="mt-3 text-[28px] font-semibold leading-tight tracking-[-0.02em] text-ink">Plan &amp; billing</h1>
           <p className="mt-2 max-w-[520px] text-[14px] leading-relaxed text-ink-2">
             Your plan covers every project you own — the people you invite use it for free.
           </p>
@@ -122,14 +134,14 @@ export function BillingPage() {
           </Notice>
         )}
         {checkout === "cancel" && <Notice tone="neutral">Checkout was cancelled. Nothing was charged.</Notice>}
-        {status && !status.stripeEnabled && (
+        {status && !status.stripeEnabled && !complimentary && (
           <Notice tone="neutral" icon={<AlertTriangle size={14} />}>
             Payments aren&apos;t set up on this server yet. Every account is on the Free plan until they are.
           </Notice>
         )}
         {sub?.status === "past_due" && (
           <Notice tone="warn" icon={<AlertTriangle size={14} />}>
-            Your last payment failed. Update your card under “Manage billing” to keep the {planInfo?.name} plan.
+            Your last payment failed. Update your card under “Manage billing” to keep the {PLAN_BY_ID[sub.plan].name} plan.
           </Notice>
         )}
 
@@ -137,47 +149,103 @@ export function BillingPage() {
           {!status || !planInfo ? (
             <div className="h-[72px] animate-pulse rounded-lg bg-hover" />
           ) : (
-            <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">Current plan</div>
                 <div className="mt-1 flex items-center gap-2">
                   <span data-testid="current-plan" className="text-[22px] font-semibold tracking-[-0.02em] text-ink">
                     {planInfo.name}
                   </span>
-                  {sub && sub.status !== "none" && (
-                    <span className={cn("rounded-full px-1.5 py-0.5 text-[10.5px] font-medium hairline", sub.status === "past_due" ? "bg-red-soft text-red-ink" : "bg-paper text-ink-2")}>
-                      {sub.cancel_at_period_end ? "cancels at period end" : sub.status.replace("_", " ")}
-                    </span>
+                  {complimentary ? (
+                    <span className="rounded-full bg-paper px-1.5 py-0.5 text-[10.5px] font-medium text-ink-2 hairline">no payment needed</span>
+                  ) : (
+                    sub &&
+                    sub.status !== "none" && (
+                      <span className={cn("rounded-full px-1.5 py-0.5 text-[10.5px] font-medium hairline", sub.status === "past_due" ? "bg-red-soft text-red-ink" : "bg-paper text-ink-2")}>
+                        {sub.cancel_at_period_end ? "cancels at period end" : sub.status.replace("_", " ")}
+                      </span>
+                    )
                   )}
                 </div>
                 <p className="mt-1 text-[12.5px] text-ink-2">{renewalLine(status)}</p>
               </div>
-              {paying && (
-                <Button variant="secondary" onClick={openPortal} disabled={portalBusy}>
-                  <CreditCard size={13} /> {portalBusy ? "Opening…" : "Manage billing"}
-                </Button>
-              )}
             </div>
           )}
 
-          {status && planInfo && (
-            <dl className="mt-5 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
-              <Usage label="Projects you own" used={status.usage.projects} limit={planInfo.limits.projects} />
-              <Usage label="Figma comparisons this month" hint="resets on the 1st (UTC)" used={status.usage.figmaRunsThisMonth} limit={planInfo.limits.figmaComparesPerMonth} />
-              <Fact label="Pages per project" value={limitText(planInfo.limits.pagesPerProject)} />
-              <Fact label="People per project" value={limitText(planInfo.limits.membersPerProject)} />
-              <Fact label="Screen recordings" value={planInfo.limits.recordings ? "Included" : "Pro and up"} />
-              <Fact label="Frozen versions & PNG export" value={planInfo.limits.frozenVersions ? "Included" : "Pro and up"} />
-            </dl>
-          )}
+          {status && planInfo && <UsageGrid status={status} className="mt-5 border-t border-line pt-4" />}
         </section>
+
+        {status && paying && (
+          <section className="mt-4 rounded-xl bg-panel p-5 hairline" aria-labelledby="billing-details">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="billing-details" className="text-[14px] font-semibold text-ink">
+                Billing details
+              </h2>
+              <Button variant="secondary" onClick={openPortal} disabled={portalBusy}>
+                <CreditCard size={13} /> {portalBusy ? "Opening…" : "Manage billing"}
+              </Button>
+            </div>
+            {alsoPaying && sub && (
+              <p data-testid="also-paying" role="status" className="mt-3 rounded-lg bg-hover px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+                {alsoPayingLine(sub)}
+              </p>
+            )}
+            {/* one signal per state: a collaborator's ending subscription is covered by the line above */}
+            {sub?.cancel_at_period_end && sub.current_period_end && !alsoPaying && (
+              <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-hover px-3 py-2.5">
+                <p className="text-[13px] text-ink">
+                  Your plan ends on <span className="font-medium">{formatDay(sub.current_period_end)}</span> — you keep {PLAN_BY_ID[sub.plan].name} until then.
+                </p>
+                <Button variant="primary" size="sm" onClick={openPortal} disabled={portalBusy}>
+                  <RotateCcw size={12} /> Reactivate
+                </Button>
+              </div>
+            )}
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
+              Your card, invoices and VAT number are kept by Stripe, not by Redline — “Manage billing” opens your secure billing portal, where you can:
+            </p>
+            <ul className="mt-3 grid gap-x-6 gap-y-1.5 text-[12.5px] text-ink-2 sm:grid-cols-2">
+              {[
+                // nothing to cancel once the subscription has run out
+                ...(subscribed && !(alsoPaying && sub?.cancel_at_period_end) ? [{ Icon: XCircle, text: "Cancel your plan (you keep it until the period ends)" }] : []),
+                { Icon: CreditCard, text: "Change the card you pay with" },
+                { Icon: FileText, text: "Download your invoices and receipts" },
+                { Icon: FileText, text: "Add a VAT number and billing address for your invoices" },
+              ].map(({ Icon, text }) => (
+                <li key={text} className="flex items-start gap-2">
+                  <Icon size={13} className="mt-[3px] shrink-0 text-ink-3" /> {text}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11.5px] text-ink-3">Stripe e-mails a receipt for every payment and a note if a card payment fails.</p>
+          </section>
+        )}
 
         <section className="mt-8">
           <h2 className="text-[16px] font-semibold text-ink">Plans</h2>
-          <p className="mt-1 text-[13px] text-ink-2">Prices in euro, VAT where it applies. Change or cancel any time.</p>
-          <div className="mt-4">
-            <PlanPicker current={status?.plan ?? "free"} interval={interval} onInterval={setIntervalChoice} onChoose={choose} busy={busy} />
-          </div>
+          {complimentary ? (
+            <div className="mt-3 rounded-xl bg-panel p-5 hairline">
+              <p className="text-[13.5px] leading-relaxed text-ink">
+                {source === "admin"
+                  ? "You're a Redline admin, so your account is on Team with every limit lifted — there is nothing to buy."
+                  : "You share a project with a Redline admin, so your account is on Team at no charge for as long as you work together — including the projects you own yourself."}
+              </p>
+              <p className="mt-2 text-[12.5px] text-ink-2">
+                {source === "admin" ? "Plans and prices for everyone else live on the " : "If that changes one day, you can pick a plan here; until then there is nothing to pay. The public plans are on the "}
+                <Link href="/pricing" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-red">
+                  pricing page
+                </Link>
+                .
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="mt-1 text-[13px] text-ink-2">Prices in euro, VAT where it applies. Change or cancel any time.</p>
+              <div className="mt-4">
+                <PlanPicker current={status?.plan ?? "free"} interval={interval} onInterval={setIntervalChoice} onChoose={choose} busy={busy} />
+              </div>
+            </>
+          )}
           {error && <p className="mt-3 text-[13px] text-red-ink">{error}</p>}
         </section>
 
@@ -189,41 +257,18 @@ export function BillingPage() {
 
 function renewalLine(s: BillingStatus): string {
   const sub = s.subscription;
-  if (s.plan === "free" || !sub || !sub.current_period_end) return s.plan === "free" ? "Free forever — upgrade when you need more." : "Granted manually — no renewal date.";
-  const when = new Date(sub.current_period_end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  if (sub.cancel_at_period_end) return `Ends on ${when}. You keep ${PLAN_BY_ID[s.plan].name} until then.`;
-  return `Renews on ${when}, billed ${sub.interval === "year" ? "yearly" : "monthly"}.`;
-}
-
-const limitText = (n: number) => (n === Infinity ? "Unlimited" : String(n));
-
-function Usage({ label, hint, used, limit }: { label: string; hint?: string; used: number; limit: number }) {
-  const pct = limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  return (
-    <div>
-      <dt className="text-[12px] text-ink-3">
-        {label}
-        {hint && limit !== Infinity && <span className="text-ink-3/80"> · {hint}</span>}
-      </dt>
-      <dd className="mt-0.5 text-[13.5px] font-medium text-ink">
-        {used} of {limitText(limit)}
-      </dd>
-      {limit !== Infinity && (
-        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-hover">
-          <div className={cn("h-full rounded-full", pct >= 100 ? "bg-red" : "bg-ink")} style={{ width: `${pct}%` }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[12px] text-ink-3">{label}</dt>
-      <dd className="mt-0.5 text-[13.5px] font-medium text-ink">{value}</dd>
-    </div>
-  );
+  const source = planSource(s);
+  const until = planUntil(s);
+  if (source === "admin") return "You're a Redline admin — Team is on the house.";
+  if (source === "collaborator") return "Complimentary Team, because you share a project with a Redline admin.";
+  if (s.plan === "free") return sub?.status === "canceled" ? "Your subscription has ended — you're on Free. Upgrade again any time." : "Free forever — upgrade when you need more.";
+  if (source === "manual" || source === "code") {
+    const how = source === "code" ? "Redeemed with a code" : "Granted manually";
+    return until ? `${how} — runs until ${formatDay(until)}, no card needed.` : `${how} — no renewal date.`;
+  }
+  if (!sub?.current_period_end) return "Granted manually — no renewal date.";
+  if (sub.cancel_at_period_end) return `Cancels on ${formatDay(sub.current_period_end)} — details and Reactivate below.`;
+  return `Renews on ${formatDay(sub.current_period_end)}, billed ${sub.interval === "year" ? "yearly" : "monthly"}.`;
 }
 
 function Notice({ tone, icon, children }: { tone: "good" | "neutral" | "warn"; icon?: React.ReactNode; children: React.ReactNode }) {

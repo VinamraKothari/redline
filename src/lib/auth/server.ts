@@ -106,7 +106,8 @@ export async function syncProfile(u: SessionUser): Promise<Profile> {
   const profile: Profile = {
     id: u.id,
     email: u.email,
-    name: u.name,
+    // the name starts as Google's and is then the account's own (editable on /account); e-mail and picture stay Google's
+    name: existing?.name || u.name,
     avatar_url: u.avatar_url,
     color: existing?.color || colorFor(u.email),
     created_at: existing?.created_at || new Date().toISOString(),

@@ -29,10 +29,15 @@ export async function signInWithGoogle(next = "/"): Promise<void> {
   if (error) throw error;
 }
 
-export async function signOut(): Promise<void> {
+/**
+ * Ends the session in both modes (Supabase cookies, test cookie) and leaves
+ * for `to` — the sign-in page by default; account deletion sends people to
+ * the landing page with its "account deleted" notice instead.
+ */
+export async function signOut(to = "/login"): Promise<void> {
   const sb = supabaseBrowser();
   await sb?.auth.signOut().catch(() => {});
   await fetch("/api/auth/test", { method: "DELETE" }).catch(() => {});
   clearCachedSettings();
-  window.location.href = "/login";
+  window.location.href = to;
 }

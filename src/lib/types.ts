@@ -16,6 +16,8 @@ export interface Profile {
   color: string;
   created_at: string;
   updated_at: string;
+  /** set on the profile /api/me returns (never stored): may open the admin area */
+  is_admin?: boolean;
 }
 
 /** Per-account preferences (stored as JSON; every field optional so old rows keep working). */
@@ -39,6 +41,47 @@ export interface Subscription {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
   updated_at: string;
+  /** where the plan came from: Stripe, an admin's manual grant, or a redeemed code */
+  source?: "stripe" | "manual" | "code";
+  note?: string | null;
+  granted_by?: string | null;
+  /** manual grants and codes end here; Stripe rows use current_period_end */
+  expires_at?: string | null;
+}
+
+/** A redeemable code that grants a paid plan for a number of months without a card. */
+export interface GrantCode {
+  code: string;
+  plan: "pro" | "team";
+  months: number;
+  max_uses: number;
+  uses: number;
+  active: boolean;
+  expires_at: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** One line of the admin audit log. */
+export interface AuditEntry {
+  id?: number;
+  actor_id: string | null;
+  action: string;
+  target_user_id: string | null;
+  details: Record<string, unknown>;
+  at: string;
+}
+
+/** A row of the admin's user list: the profile plus what the billing tables know. */
+export interface AdminUserRow {
+  profile: Profile;
+  subscription: Subscription | null;
+  is_admin: boolean;
+  /** shares a project with an admin (complimentary Team) */
+  collaborator: boolean;
+  projects_owned: number;
+  memberships: number;
 }
 
 export interface Project {

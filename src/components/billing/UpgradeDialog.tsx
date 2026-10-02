@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type BillingStatus, type PaywallDetail } from "@/lib/api";
 import { PLAN_BY_ID, type Interval, type PlanId } from "@/lib/billing/plans";
 import { Dialog, DialogContent } from "@/components/ui/primitives";
+import { isComplimentary, planSource } from "./plan-source";
 import { PlanPicker } from "./PlanPicker";
 
 /**
@@ -59,6 +60,18 @@ function UpgradeDialog({ detail }: { detail: PaywallDetail }) {
       <DialogContent title="This project's plan doesn't include that" description={`This project belongs to ${owner}. ${detail.message.replace(/ Upgrade to .*$/, "")}`} width={440}>
         <p className="text-[13px] text-ink-2">
           Ask {owner} to upgrade to {suggested.name} — limits follow the project owner&apos;s plan, so everyone in the project benefits.
+        </p>
+      </DialogContent>
+    );
+  }
+  // Admins and their collaborators are on Team without paying: should a limit
+  // ever reach them (a stale page, a plan that just changed) there is nothing
+  // to sell, so say what is going on instead of showing prices.
+  if (status && isComplimentary(planSource(status))) {
+    return (
+      <DialogContent title="Your plan is complimentary" description={detail.message.replace(/ Upgrade to .*$/, "")} width={440}>
+        <p className="text-[13px] text-ink-2">
+          Your account is on Team at no charge{planSource(status) === "admin" ? " because you're a Redline admin" : " because you share a project with a Redline admin"}, so this limit shouldn&apos;t apply. Reload the page and try again — if it keeps happening, {planSource(status) === "admin" ? "check the admin area" : "tell the admin"}.
         </p>
       </DialogContent>
     );

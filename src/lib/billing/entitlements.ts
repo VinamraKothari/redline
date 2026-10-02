@@ -1,9 +1,11 @@
 import { db } from "@/lib/db";
 import { HttpError, PaywallError } from "@/lib/auth/server";
+import { adminEmails } from "@/lib/admin/auth";
+import type { Subscription } from "@/lib/types";
 import { PLAN_BY_ID, PLANS, planOf, type Plan, type PlanId, type PlanLimits } from "./plans";
 
 /**
- * What an account may do, derived from its subscription row and plans.ts.
+ * What an account may do, derived from who it is and its subscription row.
  * Limits are always judged against the *project owner's* plan, so one paid
  * seat covers everyone the owner invites — which is also why every gate
  * takes the caller's id: a member who hits the owner's limit is told whose
@@ -15,12 +17,77 @@ import { PLAN_BY_ID, PLANS, planOf, type Plan, type PlanId, type PlanLimits } fr
  */
 
 /** Subscription statuses that keep the paid plan. past_due is a grace period while Stripe retries the card. */
-const ENTITLED = new Set(["active", "trialing", "past_due"]);
+export const ENTITLED = new Set(["active", "trialing", "past_due"]);
+
+/** Where an account's plan comes from, most privileged first. */
+export type PlanSource = "admin" | "collaborator" | "stripe" | "manual" | "code" | "free";
+
+export interface EffectivePlan {
+  plan: Plan;
+  source: PlanSource;
+  /** when the plan ends or renews: a Stripe period end, a grant's expiry, or null for "no end date" */
+  until: string | null;
+  /** the subscription row, whatever the plan was derived from (null when there is none) */
+  row: Subscription | null;
+}
+
+/**
+ * Who manages a subscription row. A row Stripe wrote always carries the
+ * subscription id, so that is the test — not the `source` column, which an
+ * older write path may leave stale underneath a Stripe sync.
+ */
+export function rowSource(row: Subscription): "stripe" | "manual" | "code" {
+  if (row.stripe_subscription_id) return "stripe";
+  return row.source === "manual" || row.source === "code" ? row.source : "stripe";
+}
+
+/** A manual grant or redeemed code counts while it has no end date or the end date is ahead. */
+export function grantActive(row: Subscription, now = Date.now()): boolean {
+  return row.plan !== "free" && (!row.expires_at || Date.parse(row.expires_at) > now);
+}
+
+/** True when Stripe is the system of record for this row — the admin area never edits those. */
+export function stripeManaged(row: Subscription | null): boolean {
+  return Boolean(row && rowSource(row) === "stripe" && row.stripe_subscription_id && ENTITLED.has(row.status));
+}
+
+/**
+ * The plan an account actually enjoys. Admins are on Team; so is everyone who
+ * shares a project an admin owns ("complimentary" — the owner's collaborators
+ * never pay). Then the subscription row: a Stripe subscription in good
+ * standing, or a manual grant / redeemed code that hasn't expired. Else Free.
+ *
+ * `known` lets callers that already hold the facts (the admin user list) skip
+ * the lookups; everything missing is fetched.
+ */
+export async function effectivePlan(
+  userId: string,
+  known: { email?: string | null; isAdmin?: boolean; collaborator?: boolean; row?: Subscription | null } = {},
+): Promise<EffectivePlan> {
+  const d = await db();
+  // one round trip for everything the caller didn't already know
+  const [row, email, dbAdmin, collaborator] = await Promise.all([
+    known.row !== undefined ? known.row : d.getSubscription(userId),
+    known.email !== undefined ? known.email : known.isAdmin !== undefined ? null : d.getProfile(userId).then((p) => p?.email ?? null),
+    known.isAdmin !== undefined ? known.isAdmin : d.isAdmin(userId),
+    known.collaborator !== undefined ? known.collaborator : d.isAdminCollaborator(userId),
+  ]);
+  const admin = known.isAdmin ?? (dbAdmin || Boolean(email && adminEmails().has(email.toLowerCase())));
+  if (admin) return { plan: PLAN_BY_ID.team, source: "admin", until: null, row };
+  if (collaborator) return { plan: PLAN_BY_ID.team, source: "collaborator", until: null, row };
+  if (row) {
+    const source = rowSource(row);
+    if (source === "stripe") {
+      if (ENTITLED.has(row.status)) return { plan: planOf(row.plan), source, until: row.current_period_end, row };
+    } else if (grantActive(row)) {
+      return { plan: planOf(row.plan), source, until: row.expires_at ?? null, row };
+    }
+  }
+  return { plan: PLAN_BY_ID.free, source: "free", until: null, row };
+}
 
 export async function planForUser(userId: string): Promise<Plan> {
-  const sub = await (await db()).getSubscription(userId);
-  if (!sub) return PLAN_BY_ID.free;
-  return ENTITLED.has(sub.status) ? planOf(sub.plan) : PLAN_BY_ID.free;
+  return (await effectivePlan(userId)).plan;
 }
 
 interface Owner {
@@ -28,6 +95,7 @@ interface Owner {
   ownerId: string;
 }
 
+/** The owner's effective plan: a project owned by an admin is Team for everyone in it. */
 export async function planForProject(projectId: string): Promise<Owner> {
   const project = await (await db()).getProject(projectId);
   if (!project) throw new HttpError(404, "This project doesn't exist or you don't have access to it.");
@@ -130,4 +198,36 @@ export async function usageFor(userId: string): Promise<{ projects: number; figm
     projects: await countOwnedProjects(userId),
     figmaRunsThisMonth: await (await db()).countFigmaRuns(userId, startOfMonthIso()),
   };
+}
+
+/** The subscription as the browser sees it: no Stripe ids, plus where the plan comes from. */
+export interface SubscriptionSummaryData {
+  plan: PlanId;
+  status: string;
+  interval: Subscription["interval"];
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  /** the account has a Stripe customer — it pays, or paid, through Stripe and can open the portal for its invoices */
+  paying: boolean;
+  source: PlanSource;
+  until: string | null;
+}
+
+/**
+ * What GET /api/billing/status and POST /api/billing/redeem answer with
+ * (`stripeEnabled` is added by the route). An admin or collaborator without a
+ * row still gets a summary, so the account page has something to describe.
+ */
+export async function billingStatusFor(userId: string): Promise<{ plan: PlanId; source: PlanSource; until: string | null; subscription: SubscriptionSummaryData | null; usage: { projects: number; figmaRunsThisMonth: number } }> {
+  const [eff, usage] = await Promise.all([effectivePlan(userId), usageFor(userId)]);
+  const row = eff.row;
+  // a grant written over a lapsed Stripe row keeps the customer id, and with it the way to past invoices
+  const paying = Boolean(row?.stripe_customer_id);
+  let subscription: SubscriptionSummaryData | null = null;
+  if (row) {
+    subscription = { plan: row.plan, status: row.status, interval: row.interval, current_period_end: row.current_period_end, cancel_at_period_end: row.cancel_at_period_end, paying, source: eff.source, until: eff.until };
+  } else if (eff.source === "admin" || eff.source === "collaborator") {
+    subscription = { plan: eff.plan.id, status: "active", interval: null, current_period_end: null, cancel_at_period_end: false, paying: false, source: eff.source, until: null };
+  }
+  return { plan: eff.plan.id, source: eff.source, until: eff.until, subscription, usage };
 }

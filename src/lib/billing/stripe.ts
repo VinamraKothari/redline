@@ -198,6 +198,11 @@ export async function syncFromStripeSubscription(
     console.warn("[redline] stripe subscription without a user", sub.id, customerId);
     return { row: null, skipped: false };
   }
+  // a deleted account: its row and profile are gone, and writing one back would fail on the profile foreign key
+  if (!(await d.getProfile(userId))) {
+    console.warn("[redline] stripe subscription for an unknown or deleted user", sub.id, userId);
+    return { row: null, skipped: false };
+  }
   const current = byCustomer?.user_id === userId ? byCustomer : await d.getSubscription(userId);
   if (eventCreated && current && Date.parse(current.updated_at) > eventCreated * 1000) return { row: current, skipped: true };
   const item = sub.items.data[0];
@@ -256,5 +261,30 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<string> {
     }
     default:
       return `ignored ${event.type}`;
+  }
+}
+
+/**
+ * Cancels a subscription at once — not at the period end — when an account is
+ * deleted, so nobody is charged for a login that no longer exists. The
+ * subscription's `user_id` metadata is cleared first, so the webhooks the
+ * cancellation fires don't try to mirror a row for a profile that is gone
+ * (the sync also refuses to write for an unknown user — belt and braces). A
+ * subscription Stripe no longer knows, or has already cancelled, is not an
+ * error: the account goes anyway. Test mode has no Stripe to talk to.
+ */
+export async function cancelSubscriptionNow(subscriptionId: string): Promise<void> {
+  if (billingFakeEnabled() || !stripeEnabled()) return;
+  const stripe = getStripe();
+  const gone = (e: unknown) => {
+    const err = e as Stripe.errors.StripeError;
+    return err.code === "resource_missing" || /already (been )?cancel|canceled subscription/i.test(err.message || "");
+  };
+  try {
+    await stripe.subscriptions.update(subscriptionId, { metadata: { user_id: "" } });
+    await stripe.subscriptions.cancel(subscriptionId);
+  } catch (e) {
+    if (gone(e)) return;
+    throw e;
   }
 }

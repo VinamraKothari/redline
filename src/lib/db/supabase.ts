@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 const BUCKET = "snapshots";
 const THUMBS = "thumbnails";
@@ -67,6 +67,126 @@ export const supabaseDb: DbAdapter = {
   async recordFigmaRun(userId, reviewId, atIso) {
     const { error } = await sb().from("figma_runs").insert({ user_id: userId, review_id: reviewId, at: atIso });
     if (error && !/figma_runs/.test(error.message)) throw new Error(error.message);
+  },
+
+  /* admin — every read tolerates a missing migration-006 table (→ "no", "none") */
+  async isAdmin(userId) {
+    const { data, error } = await sb().from("admins").select("user_id").eq("user_id", userId).maybeSingle();
+    return !error && !!data;
+  },
+  async listAdmins() {
+    const { data, error } = await sb().from("admins").select("user_id, profiles(*)").returns<{ user_id: string; profiles: Profile }[]>();
+    if (error) return [];
+    return (data ?? []).map((r) => r.profiles).filter(Boolean);
+  },
+  async setAdmin(userId, admin, note) {
+    if (admin) must(await sb().from("admins").upsert({ user_id: userId, note: note ?? null }));
+    else must(await sb().from("admins").delete().eq("user_id", userId));
+  },
+  async isAdminCollaborator(userId) {
+    const { data, error } = await sb().from("admin_collaborators").select("user_id").eq("user_id", userId).maybeSingle();
+    return !error && !!data;
+  },
+  async listUsers({ query = "", limit = 50, offset = 0 }) {
+    const q = query.trim();
+    let req = sb().from("profiles").select("*", { count: "exact" }).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+    if (q) req = req.or(`name.ilike.%${q.replace(/[%,()]/g, "")}%,email.ilike.%${q.replace(/[%,()]/g, "")}%`);
+    const { data, count, error } = await req.returns<Profile[]>();
+    if (error) throw new Error(error.message);
+    const profiles = data ?? [];
+    const ids = profiles.map((p) => p.id);
+    if (!ids.length) return { rows: [], total: count ?? 0 };
+    const [subs, admins, collabs, owned, members] = await Promise.all([
+      sb().from("subscriptions").select().in("user_id", ids).returns<Subscription[]>(),
+      sb().from("admins").select("user_id").in("user_id", ids).returns<{ user_id: string }[]>(),
+      sb().from("admin_collaborators").select("user_id").in("user_id", ids).returns<{ user_id: string }[]>(),
+      sb().from("projects").select("created_by").in("created_by", ids).returns<{ created_by: string }[]>(),
+      sb().from("project_members").select("user_id").in("user_id", ids).returns<{ user_id: string }[]>(),
+    ]);
+    const subBy = new Map((subs.data ?? []).map((x) => [x.user_id, x]));
+    const adminSet = new Set((admins.data ?? []).map((x) => x.user_id));
+    const collabSet = new Set((collabs.data ?? []).map((x) => x.user_id));
+    const ownedBy = new Map<string, number>();
+    for (const o of owned.data ?? []) ownedBy.set(o.created_by, (ownedBy.get(o.created_by) ?? 0) + 1);
+    const memBy = new Map<string, number>();
+    for (const m of members.data ?? []) memBy.set(m.user_id, (memBy.get(m.user_id) ?? 0) + 1);
+    const rows: AdminUserRow[] = profiles.map((profile) => ({
+      profile,
+      subscription: subBy.get(profile.id) ?? null,
+      is_admin: adminSet.has(profile.id),
+      collaborator: collabSet.has(profile.id),
+      projects_owned: ownedBy.get(profile.id) ?? 0,
+      memberships: memBy.get(profile.id) ?? 0,
+    }));
+    return { rows, total: count ?? rows.length };
+  },
+  async deleteSubscription(userId) {
+    must(await sb().from("subscriptions").delete().eq("user_id", userId));
+  },
+  async getGrantCode(code) {
+    const { data, error } = await sb().from("grant_codes").select().eq("code", code.toUpperCase()).maybeSingle<GrantCode>();
+    if (error) return null;
+    return data ?? null;
+  },
+  async listGrantCodes() {
+    const { data, error } = await sb().from("grant_codes").select().order("created_at", { ascending: false }).returns<GrantCode[]>();
+    if (error) return [];
+    return data ?? [];
+  },
+  async upsertGrantCode(c) {
+    return must(await sb().from("grant_codes").upsert({ ...c, code: c.code.toUpperCase() }).select().single<GrantCode>());
+  },
+  /**
+   * Counts a redemption atomically: migration 007's `redeem_grant_code` does the
+   * insert and the conditional increment in one transaction. Before that
+   * migration has run, the fallback is an optimistic compare-and-set on
+   * `uses` (the update only lands if nobody else bumped it meanwhile, and only
+   * while `uses < max_uses`), which also never over-counts.
+   */
+  async redeemGrantCode(code, userId, atIso) {
+    const key = code.toUpperCase();
+    const rpc = await sb().rpc("redeem_grant_code", { p_code: key, p_user: userId });
+    if (!rpc.error) return Boolean(rpc.data);
+    if (!/redeem_grant_code|function|schema cache/i.test(rpc.error.message)) throw new Error(rpc.error.message);
+
+    const { error } = await sb().from("grant_redemptions").insert({ code: key, user_id: userId, at: atIso });
+    if (error) {
+      if (/duplicate|unique/i.test(error.message)) return false;
+      throw new Error(error.message);
+    }
+    const undo = async () => {
+      await sb().from("grant_redemptions").delete().eq("code", key).eq("user_id", userId);
+      return false;
+    };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { data: gc } = await sb().from("grant_codes").select("uses, max_uses, active, expires_at").eq("code", key).maybeSingle<{ uses: number; max_uses: number; active: boolean; expires_at: string | null }>();
+      if (!gc || !gc.active || gc.uses >= gc.max_uses || (gc.expires_at && Date.parse(gc.expires_at) < Date.now())) return undo();
+      const { data: updated, error: upErr } = await sb().from("grant_codes").update({ uses: gc.uses + 1 }).eq("code", key).eq("uses", gc.uses).lt("uses", gc.max_uses).select("code");
+      if (upErr) throw new Error(upErr.message);
+      if (updated && updated.length) return true;
+      // somebody else bumped `uses` first: read again and retry
+    }
+    return undo();
+  },
+  async appendAudit(e) {
+    const { error } = await sb().from("audit_log").insert({ actor_id: e.actor_id, action: e.action, target_user_id: e.target_user_id, details: e.details, at: e.at });
+    if (error && !/audit_log/.test(error.message)) throw new Error(error.message);
+  },
+  async listAudit({ limit = 100, targetUserId }) {
+    let req = sb().from("audit_log").select().order("at", { ascending: false }).limit(limit);
+    if (targetUserId) req = req.eq("target_user_id", targetUserId);
+    const { data, error } = await req.returns<AuditEntry[]>();
+    if (error) return [];
+    return data ?? [];
+  },
+  async deleteAccount(userId) {
+    // projects the account owns go first (their reviews, comments and shapes cascade in Postgres)
+    const { data: owned } = await sb().from("projects").select("id").eq("created_by", userId).returns<{ id: string }[]>();
+    for (const p of owned ?? []) must(await sb().from("projects").delete().eq("id", p.id));
+    must(await sb().from("profiles").delete().eq("id", userId));
+    // the auth user, so the e-mail can sign up fresh later; ignore when it is already gone
+    const { error } = await sb().auth.admin.deleteUser(userId);
+    if (error && !/not found/i.test(error.message)) throw new Error(error.message);
   },
 
   /* projects & membership */

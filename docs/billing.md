@@ -169,3 +169,40 @@ person subscribes for real, which then takes over the row).
 - **Free for education and open source** — a manual grant (above) and a form.
 - **Trials**: Stripe Checkout supports `trial_period_days`; a 14-day Pro trial
   without a card is a one-line change in `createCheckoutSession`.
+
+## Plans that don't come from Stripe
+
+Not every paid plan is paid for. `effectivePlan` (`src/lib/billing/entitlements.ts`)
+puts admins and everyone who shares a project with an admin on Team, honours an
+admin's manual grants and redeemed codes while they last, and only then reads
+the Stripe subscription. `GET /api/billing/status` reports the `source`
+(`admin`, `collaborator`, `stripe`, `manual`, `code`, `free`) and `until`.
+Grants, codes, Stripe coupons and the admin area that manages them are
+described in [`docs/admin.md`](./admin.md).
+
+## Account self-service (`/account`)
+
+Besides `/account/billing`, every account has a hub at `/account`: profile
+(name and pin colour are editable — `PATCH /api/me`; e-mail and picture stay
+Google's — and once a name is set here, `syncProfile` keeps it: a later rename
+in the Google account no longer overrides it), the plan in one line with its source (Stripe / manual grant / code /
+admin / collaborator) and a box to redeem a code, usage, the projects the
+account owns or belongs to (members can leave — `DELETE
+/api/projects/[id]/members/me`; owners delete from the project page), and
+"Delete my account" (`DELETE /api/me`: cancels a Stripe subscription at once
+via `cancelSubscriptionNow` — which first blanks the subscription's `user_id`
+metadata, and `syncFromStripeSubscription` ignores events for a user without a
+profile, so the cancellation's own webhooks can't fail on the deleted row —
+then `deleteAccount` on the adapter, then clears the session cookies; the
+landing page shows a notice at `/?deleted=1`).
+
+Cards, invoices, cancellation and VAT numbers are all handled in the Stripe
+customer portal ("Manage billing"); the billing page says so and lists those
+four so people know what is behind the button. Receipts are Stripe's job too:
+
+9. **Customer e-mails** (Settings → Business → Customer emails): switch on
+   *Successful payments* (receipts) and *Failed payments* so people hear from
+   Stripe when a card is charged or declined — Redline sends no e-mail of its
+   own. In the same place, enable the *Invoices* e-mails if your Team
+   customers expect a PDF invoice per period rather than fetching it from the
+   portal.

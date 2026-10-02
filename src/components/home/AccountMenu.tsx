@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { FolderKanban, LogOut, Settings } from "lucide-react";
+import { FolderKanban, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { Avatar, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { signOut } from "@/lib/auth/client";
@@ -54,9 +54,25 @@ export function AccountMenu({ size = 26 }: { size?: number }) {
                 <FolderKanban size={13} /> Projects
               </Link>
             </MenuItem>
+            <MenuItem asChild>
+              <Link href="/account">
+                <UserRound size={13} /> Account
+              </Link>
+            </MenuItem>
             <MenuItem onSelect={openSettings}>
               <Settings size={13} /> Settings
             </MenuItem>
+            {/* only admins see the way into /admin; the server checks again on every request there */}
+            {me.is_admin && (
+              <>
+                <MenuSeparator />
+                <MenuItem asChild>
+                  <Link href="/admin">
+                    <ShieldCheck size={13} /> Admin
+                  </Link>
+                </MenuItem>
+              </>
+            )}
             <MenuSeparator />
             <MenuItem onSelect={() => signOut()}>
               <LogOut size={13} /> Sign out

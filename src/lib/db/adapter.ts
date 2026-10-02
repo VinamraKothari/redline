@@ -1,4 +1,4 @@
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Storage adapter. Two implementations:
@@ -21,6 +21,25 @@ export interface DbAdapter {
   /** how many "Compare with Figma" runs the account made since `sinceIso` */
   countFigmaRuns(userId: string, sinceIso: string): Promise<number>;
   recordFigmaRun(userId: string, reviewId: string, atIso: string): Promise<void>;
+
+  /* admin */
+  isAdmin(userId: string): Promise<boolean>;
+  listAdmins(): Promise<Profile[]>;
+  setAdmin(userId: string, admin: boolean, note?: string): Promise<void>;
+  /** members of any project an admin owns (excluding the admins themselves) */
+  isAdminCollaborator(userId: string): Promise<boolean>;
+  /** paged user list for the admin area; `query` matches name or e-mail */
+  listUsers(opts: { query?: string; limit?: number; offset?: number }): Promise<{ rows: AdminUserRow[]; total: number }>;
+  deleteSubscription(userId: string): Promise<void>;
+  getGrantCode(code: string): Promise<GrantCode | null>;
+  listGrantCodes(): Promise<GrantCode[]>;
+  upsertGrantCode(c: GrantCode): Promise<GrantCode>;
+  /** records a redemption and bumps `uses` atomically; false when already redeemed by this user, used up, inactive or expired */
+  redeemGrantCode(code: string, userId: string, atIso: string): Promise<boolean>;
+  appendAudit(e: AuditEntry): Promise<void>;
+  listAudit(opts: { limit?: number; targetUserId?: string }): Promise<AuditEntry[]>;
+  /** removes the account and everything it owns (profile row cascades; the auth user too on Supabase) */
+  deleteAccount(userId: string): Promise<void>;
 
   /* projects & membership */
   createProject(p: Project, owner: string): Promise<Project>;

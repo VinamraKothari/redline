@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { Comment, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Development fallback: a single JSON file under .data/.
@@ -20,9 +20,13 @@ interface Store {
   settings: Record<string, UserSettings>; // key: user_id
   subscriptions: Record<string, Subscription>; // key: user_id
   figmaRuns: { user_id: string; review_id: string; at: string }[];
+  admins: Record<string, { note?: string; created_at: string }>; // key: user_id
+  grantCodes: Record<string, GrantCode>;
+  grantRedemptions: { code: string; user_id: string; at: string }[];
+  audit: AuditEntry[];
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [] });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -104,6 +108,100 @@ const impl: DbAdapter = {
   async recordFigmaRun(userId, reviewId, atIso) {
     const s = await load();
     s.figmaRuns.push({ user_id: userId, review_id: reviewId, at: atIso });
+    await persist();
+  },
+
+  /* admin */
+  async isAdmin(userId) {
+    return !!(await load()).admins[userId];
+  },
+  async listAdmins() {
+    const s = await load();
+    return Object.keys(s.admins).map((id) => s.profiles[id]).filter(Boolean);
+  },
+  async setAdmin(userId, admin, note) {
+    const s = await load();
+    if (admin) s.admins[userId] = { note, created_at: new Date().toISOString() };
+    else delete s.admins[userId];
+    await persist();
+  },
+  async isAdminCollaborator(userId) {
+    const s = await load();
+    return Object.values(s.members).some((m) => m.user_id === userId && s.projects[m.project_id] && s.projects[m.project_id].created_by !== userId && !!s.admins[s.projects[m.project_id].created_by]);
+  },
+  async listUsers({ query = "", limit = 50, offset = 0 }) {
+    const s = await load();
+    const q = query.trim().toLowerCase();
+    const all = Object.values(s.profiles)
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const rows: AdminUserRow[] = [];
+    for (const profile of all.slice(offset, offset + limit)) {
+      rows.push({
+        profile,
+        subscription: s.subscriptions[profile.id] ?? null,
+        is_admin: !!s.admins[profile.id],
+        collaborator: await this.isAdminCollaborator(profile.id),
+        projects_owned: Object.values(s.projects).filter((p) => p.created_by === profile.id).length,
+        memberships: Object.values(s.members).filter((m) => m.user_id === profile.id).length,
+      });
+    }
+    return { rows, total: all.length };
+  },
+  async deleteSubscription(userId) {
+    const s = await load();
+    delete s.subscriptions[userId];
+    await persist();
+  },
+  async getGrantCode(code) {
+    return (await load()).grantCodes[code.toUpperCase()] ?? null;
+  },
+  async listGrantCodes() {
+    return Object.values((await load()).grantCodes).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  },
+  async upsertGrantCode(c) {
+    const s = await load();
+    s.grantCodes[c.code.toUpperCase()] = { ...c, code: c.code.toUpperCase() };
+    await persist();
+    return s.grantCodes[c.code.toUpperCase()];
+  },
+  /** Every call runs alone (see the proxy below), so checking and counting here is atomic. */
+  async redeemGrantCode(code, userId, atIso) {
+    const s = await load();
+    const key = code.toUpperCase();
+    const gc = s.grantCodes[key];
+    if (!gc || !gc.active || gc.uses >= gc.max_uses || (gc.expires_at && Date.parse(gc.expires_at) < Date.now())) return false;
+    if (s.grantRedemptions.some((r) => r.code === key && r.user_id === userId)) return false;
+    s.grantRedemptions.push({ code: key, user_id: userId, at: atIso });
+    gc.uses += 1;
+    await persist();
+    return true;
+  },
+  async appendAudit(e) {
+    const s = await load();
+    s.audit.push({ ...e, id: s.audit.length + 1 });
+    await persist();
+  },
+  async listAudit({ limit = 100, targetUserId }) {
+    const s = await load();
+    return s.audit
+      .filter((e) => !targetUserId || e.target_user_id === targetUserId)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, limit);
+  },
+  async deleteAccount(userId) {
+    const s = await load();
+    for (const p of Object.values(s.projects)) if (p.created_by === userId) await this.deleteProject(p.id);
+    const s2 = await load();
+    for (const [k, m] of Object.entries(s2.members)) if (m.user_id === userId) delete s2.members[k];
+    for (const [k, r] of Object.entries(s2.reads)) if (k.startsWith(userId + "/")) delete s2.reads[k];
+    // what they wrote in other people's projects stays, unattributed — the same as Postgres's `on delete set null`
+    for (const c of Object.values(s2.comments)) if (c.author_id === userId) c.author_id = null;
+    for (const sh of Object.values(s2.shapes)) if (sh.author_id === userId) sh.author_id = null;
+    delete s2.subscriptions[userId];
+    delete s2.settings[userId];
+    delete s2.admins[userId];
+    delete s2.profiles[userId];
     await persist();
   },
 

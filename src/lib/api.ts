@@ -1,8 +1,11 @@
 "use client";
 
-import type { Anchor, Attachment, Comment, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
+import type { Anchor, Attachment, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
 import type { PublicReview } from "./review";
 import type { Interval, PlanId } from "./billing/plans";
+import type { PlanSource } from "./billing/entitlements";
+import type { AdminStats, AdminUserDetail, AdminUserList, AuditView, PromoList } from "./admin/types";
+import type { NewPromo, Promo } from "./admin/stripe-promos";
 
 export type ProjectSummary = Project & { role: Role; review_count: number; preview_urls: string[] };
 
@@ -16,11 +19,20 @@ export interface PaywallDetail {
   ownerName?: string;
 }
 
-/** The subscription as the browser sees it: no Stripe ids. */
-export type SubscriptionSummary = Pick<Subscription, "plan" | "status" | "interval" | "current_period_end" | "cancel_at_period_end"> & { paying: boolean };
+/**
+ * The subscription as the browser sees it: no Stripe ids. `source` and `until`
+ * describe the *effective* plan (an admin's collaborator with a lapsed Stripe
+ * row is "collaborator", not "stripe"); `paying` says whether Stripe bills
+ * this account, so "Manage billing" can still be offered.
+ */
+export type SubscriptionSummary = Pick<Subscription, "plan" | "status" | "interval" | "current_period_end" | "cancel_at_period_end"> & { paying: boolean; source: PlanSource; until: string | null };
 
 export interface BillingStatus {
   plan: PlanId;
+  /** where the plan comes from — see PlanSource */
+  source: PlanSource;
+  /** when it ends or renews; null for no end date */
+  until: string | null;
   subscription: SubscriptionSummary | null;
   usage: { projects: number; figmaRunsThisMonth: number };
   stripeEnabled: boolean;
@@ -247,6 +259,60 @@ export const api = {
     },
     portal() {
       return call<{ url: string }>("/api/billing/portal", { method: "POST" });
+    },
+    /** a plan without a card; answers with the new status (same shape as `status()`) */
+    redeem(code: string) {
+      return call<BillingStatus>("/api/billing/redeem", { method: "POST", body: JSON.stringify({ code }) });
+    },
+  },
+
+  /* admin area — every call is 403 for non-admins */
+  admin: {
+    stats() {
+      return call<AdminStats>("/api/admin/stats", { cache: "no-store" });
+    },
+    users(opts: { query?: string; offset?: number; limit?: number } = {}) {
+      const q = new URLSearchParams();
+      if (opts.query) q.set("query", opts.query);
+      if (opts.offset) q.set("offset", String(opts.offset));
+      if (opts.limit) q.set("limit", String(opts.limit));
+      const qs = q.toString();
+      return call<AdminUserList>(`/api/admin/users${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+    },
+    user(id: string) {
+      return call<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(id)}`, { cache: "no-store" });
+    },
+    /** `months` null = no end date; plan "free" takes a grant away; mode "extend" adds the months to the running grant */
+    setPlan(id: string, body: { plan: PlanId; months: number | null; note: string; mode?: "replace" | "extend" }) {
+      return call<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(id)}/plan`, { method: "POST", body: JSON.stringify(body) });
+    },
+    setAdmin(id: string, admin: boolean) {
+      return call<AdminUserDetail>(`/api/admin/users/${encodeURIComponent(id)}/admin`, { method: "POST", body: JSON.stringify({ admin }) });
+    },
+    codes() {
+      return call<{ codes: GrantCode[] }>("/api/admin/codes", { cache: "no-store" });
+    },
+    createCode(body: { code?: string; plan: Exclude<PlanId, "free">; months: number; max_uses: number; expires_at?: string | null; note?: string }) {
+      return call<{ code: GrantCode }>("/api/admin/codes", { method: "POST", body: JSON.stringify(body) });
+    },
+    setCodeActive(code: string, active: boolean) {
+      return call<{ code: GrantCode }>(`/api/admin/codes/${encodeURIComponent(code)}`, { method: "POST", body: JSON.stringify({ active }) });
+    },
+    audit(opts: { target?: string; limit?: number } = {}) {
+      const q = new URLSearchParams();
+      if (opts.target) q.set("target", opts.target);
+      if (opts.limit) q.set("limit", String(opts.limit));
+      const qs = q.toString();
+      return call<{ entries: AuditView[] }>(`/api/admin/audit${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+    },
+    promos() {
+      return call<PromoList>("/api/admin/stripe/coupons", { cache: "no-store" });
+    },
+    createPromo(body: NewPromo) {
+      return call<{ promo: Promo }>("/api/admin/stripe/coupons", { method: "POST", body: JSON.stringify(body) });
+    },
+    setPromoActive(id: string, active: boolean) {
+      return call<{ promo: Promo }>(`/api/admin/stripe/coupons/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ active }) });
     },
   },
 };

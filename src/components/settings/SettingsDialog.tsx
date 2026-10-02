@@ -216,18 +216,28 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 Account
               </h3>
             </div>
-            <div className="mt-2 flex items-center gap-3 rounded-lg bg-paper px-3 py-2 hairline">
+            <div className="mt-2 flex flex-col gap-2 rounded-lg bg-paper px-3 py-2 hairline sm:flex-row sm:items-center sm:gap-3">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12.5px] font-medium text-ink">{me?.name ?? "—"}</div>
                 <div className="truncate text-[11.5px] text-ink-3">{me?.email ?? "Signed in with Google"}</div>
               </div>
-              <Link
-                href="/account/billing"
-                onClick={() => onOpenChange(false)}
-                className="press inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-panel px-2.5 text-[12px] font-medium text-ink hairline hover:bg-hover"
-              >
-                <CreditCard size={12} /> Billing &amp; plan
-              </Link>
+              {/* on a phone the two links sit under the name instead of squeezing it */}
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  href="/account"
+                  onClick={() => onOpenChange(false)}
+                  className="press inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-panel px-2.5 text-[12px] font-medium text-ink hairline hover:bg-hover"
+                >
+                  <UserRound size={12} /> Account
+                </Link>
+                <Link
+                  href="/account/billing"
+                  onClick={() => onOpenChange(false)}
+                  className="press inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-panel px-2.5 text-[12px] font-medium text-ink hairline hover:bg-hover"
+                >
+                  <CreditCard size={12} /> Billing &amp; plan
+                </Link>
+              </div>
             </div>
           </section>
         </div>
