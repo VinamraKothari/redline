@@ -209,6 +209,13 @@ export async function syncFromStripeSubscription(
   const price = item?.price;
   const plan = planFromPrice(price, current?.plan ?? "pro");
   if (plan === "free") return { row: null, skipped: false };
+  // Since API version 2025+ a cancellation "at the end of the period" (the
+  // customer portal's default) arrives as `cancel_at` = the period end with
+  // `cancel_at_period_end` left false; older clients and the API's legacy
+  // flag still set the boolean. Either means "ends, doesn't renew", and the
+  // date it ends on is `cancel_at` when Stripe gives one.
+  const endsAt = sub.status !== "canceled" && sub.cancel_at ? sub.cancel_at : null;
+  const periodEnd = endsAt ?? item?.current_period_end ?? null;
   const row = await d.upsertSubscription({
     user_id: userId,
     plan,
@@ -217,8 +224,8 @@ export async function syncFromStripeSubscription(
     stripe_customer_id: customerId,
     stripe_subscription_id: sub.id,
     price_id: price?.id ?? null,
-    current_period_end: item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null,
-    cancel_at_period_end: Boolean(sub.cancel_at_period_end),
+    current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    cancel_at_period_end: Boolean(sub.cancel_at_period_end) || endsAt !== null,
     updated_at: new Date(eventCreated ? eventCreated * 1000 : Date.now()).toISOString(),
   });
   return { row, skipped: false };

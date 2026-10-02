@@ -211,12 +211,18 @@ test("signed webhook events: the subscription is re-fetched, stale payloads and 
   // the guard ignores events from before the row's last change (see syncFromStripeSubscription).
   const wendy = await signIn(page, "Wendy Webhook");
   await goFree(page);
-  const status = async () => (await (await page.request.get("/api/billing/status")).json()) as { plan: string; subscription: { status: string; interval: string | null; paying: boolean } | null };
+  const status = async () => (await (await page.request.get("/api/billing/status")).json()) as { plan: string; subscription: { status: string; interval: string | null; paying: boolean; cancel_at_period_end: boolean; current_period_end: string | null } | null };
 
   // a checkout for a Team subscription: the account is found through client_reference_id
   const checkout = await sendEvent(page.request, "checkout.session.completed", { id: "cs_test_1", object: "checkout.session", mode: "subscription", subscription: "sub_billingtest_active", client_reference_id: wendy.id, metadata: {} }, 10);
   expect(checkout.status()).toBe(200);
   expect(await status()).toMatchObject({ plan: "team", subscription: { status: "active", interval: "month", paying: true } });
+
+  // the customer portal cancels "at the end of the period" by setting `cancel_at` (the legacy
+  // boolean stays false): the row must still read as ending, on that date
+  const ending = await sendEvent(page.request, "customer.subscription.updated", { id: "sub_billingtest_ending", object: "subscription", status: "active", customer: "cus_billingtest" }, 15);
+  expect(ending.status()).toBe(200);
+  expect(await status()).toMatchObject({ plan: "team", subscription: { status: "active", cancel_at_period_end: true, current_period_end: new Date(1793388692 * 1000).toISOString() } });
 
   // an "updated" event whose payload still says active, but Stripe (the mock) says cancelled: Stripe wins
   const cancelled = await sendEvent(page.request, "customer.subscription.updated", { id: "sub_billingtest_canceled", object: "subscription", status: "active", customer: "cus_billingtest" }, 30);

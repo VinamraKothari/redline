@@ -206,3 +206,13 @@ four so people know what is behind the button. Receipts are Stripe's job too:
    own. In the same place, enable the *Invoices* e-mails if your Team
    customers expect a PDF invoice per period rather than fetching it from the
    portal.
+
+## Cancellations arrive as `cancel_at`
+
+On the API versions this app uses (2025 and later) a cancellation "at the
+end of the period" — what the customer portal does by default — comes back
+as `cancel_at` = the period end while the legacy `cancel_at_period_end`
+boolean stays `false`. `syncFromStripeSubscription` treats either as "ends,
+doesn't renew" and stores `cancel_at` as the row's `current_period_end`, so
+the billing page says "Your plan ends on …" with the right date. Reactivating
+in the portal clears `cancel_at` and the next event puts the renewal back.
