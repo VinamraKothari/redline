@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-11-04",
+    title: "Folders inside projects and unresolved-comment badges on page cards",
+    tag: "new",
+    items: [
+      "Group the pages of a project into folders: create one next to the page list, drag pages onto it or pick “Move to folder…” from a page's menu, and open it like any page. Deleting a folder puts its pages back in the project — nothing is lost.",
+      "Every page card (and folder card) shows a small red count of unresolved comment threads, and a violet count of open developer comments when there are any, so you can see at a glance what's still pending without opening the page.",
+    ],
+  },
+  {
     date: "2026-09-30",
     title: "Plans, a pricing page and a proper site",
     tag: "new",

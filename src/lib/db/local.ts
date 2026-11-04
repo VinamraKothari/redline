@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import { isDevComment } from "@/lib/figma/dev";
 
 /**
  * Development fallback: a single JSON file under .data/.
@@ -14,6 +15,7 @@ interface Store {
   shapes: Record<string, Shape>;
   profiles: Record<string, Profile>;
   projects: Record<string, Project>;
+  folders: Record<string, Folder>;
   members: Record<string, ProjectMember>; // key: project_id/user_id
   invites: Record<string, ProjectInvite>;
   reads: Record<string, Record<string, string>>; // key: user_id/review_id
@@ -26,7 +28,9 @@ interface Store {
   audit: AuditEntry[];
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, folders: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
+/** folder order: manual position first, then age */
+const byPosition = (a: Folder, b: Folder) => a.position - b.position || a.created_at.localeCompare(b.created_at);
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -226,6 +230,7 @@ const impl: DbAdapter = {
   async deleteProject(id) {
     const s = await load();
     delete s.projects[id];
+    for (const f of Object.values(s.folders)) if (f.project_id === id) delete s.folders[f.id];
     for (const [k, m] of Object.entries(s.members)) if (m.project_id === id) delete s.members[k];
     for (const [k, i] of Object.entries(s.invites)) if (i.project_id === id) delete s.invites[k];
     for (const r of Object.values(s.reviews)) {
@@ -312,6 +317,53 @@ const impl: DbAdapter = {
       inv.accepted_at = new Date().toISOString();
     }
     await persist();
+  },
+
+  /* folders */
+  async listFolders(projectId) {
+    const s = await load();
+    return Object.values(s.folders)
+      .filter((f) => f.project_id === projectId)
+      .sort(byPosition);
+  },
+  async getFolder(id) {
+    return (await load()).folders[id] ?? null;
+  },
+  async createFolder(f) {
+    const s = await load();
+    s.folders[f.id] = f;
+    await persist();
+    return f;
+  },
+  async updateFolder(id, patch) {
+    const s = await load();
+    if (!s.folders[id]) return null;
+    s.folders[id] = { ...s.folders[id], ...patch, updated_at: new Date().toISOString() };
+    await persist();
+    return s.folders[id];
+  },
+  async deleteFolder(id) {
+    const s = await load();
+    // the pages stay — they just fall back to the project root
+    for (const r of Object.values(s.reviews)) if (r.folder_id === id) r.folder_id = null;
+    delete s.folders[id];
+    await persist();
+  },
+  async countOpenThreads(projectId) {
+    const s = await load();
+    const ids = new Set(
+      Object.values(s.reviews)
+        .filter((r) => r.project_id === projectId)
+        .map((r) => r.id),
+    );
+    const out: Record<string, OpenThreadCount> = {};
+    for (const c of Object.values(s.comments)) {
+      if (c.parent_id !== null || c.resolved || !ids.has(c.review_id)) continue;
+      const n = (out[c.review_id] ??= { open: 0, dev: 0 });
+      if (isDevComment(c)) n.dev++;
+      else n.open++;
+    }
+    return out;
   },
 
   async createReview(r) {

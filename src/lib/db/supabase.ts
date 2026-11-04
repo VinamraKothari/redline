@@ -2,11 +2,19 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import { isDevComment } from "@/lib/figma/dev";
 
 const BUCKET = "snapshots";
 const THUMBS = "thumbnails";
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
+/**
+ * Postgres / PostgREST saying the `folders` table or the `folder_id` column is
+ * not there: migration 008 hasn't run yet. Deliberately narrow — a constraint
+ * violation that happens to name the table is a real error.
+ */
+const missingFolders = (message: string) => /(relation|table) ["']public\.folders["']|column .*folder_id.* does not exist|'folder_id' column .*schema cache/i.test(message);
+const FOLDERS_NOT_SET_UP = "Folders are not set up yet — run migration 008 first.";
 
 let client: SupabaseClient | null = null;
 function sb(): SupabaseClient {
@@ -284,6 +292,67 @@ export const supabaseDb: DbAdapter = {
       if (!current || RANK[inv.role] > RANK[current]) await this.setMember(inv.project_id, userId, inv.role);
       must(await sb().from("project_invites").update({ accepted_at: new Date().toISOString() }).eq("id", inv.id));
     }
+  },
+
+  /* folders — reads degrade to "no folders" until migration 008 has run; writes say so */
+  async listFolders(projectId) {
+    const { data, error } = await sb().from("folders").select().eq("project_id", projectId).order("position").order("created_at").returns<Folder[]>();
+    if (error) {
+      if (missingFolders(error.message)) return [];
+      throw new Error(error.message);
+    }
+    return data ?? [];
+  },
+  async getFolder(id) {
+    const { data, error } = await sb().from("folders").select().eq("id", id).maybeSingle<Folder>();
+    if (error) {
+      if (missingFolders(error.message)) return null;
+      throw new Error(error.message);
+    }
+    return data ?? null;
+  },
+  async createFolder(f) {
+    const { data, error } = await sb().from("folders").insert(f).select().single<Folder>();
+    if (error) throw new Error(missingFolders(error.message) ? FOLDERS_NOT_SET_UP : error.message);
+    return data;
+  },
+  async updateFolder(id, patch) {
+    const { data, error } = await sb()
+      .from("folders")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .maybeSingle<Folder>();
+    if (error) throw new Error(missingFolders(error.message) ? FOLDERS_NOT_SET_UP : error.message);
+    return data ?? null;
+  },
+  async deleteFolder(id) {
+    // explicit, not only the FK's `on delete set null`, so the pages are back at the root even if the constraint was created differently
+    must(await sb().from("reviews").update({ folder_id: null }).eq("folder_id", id));
+    must(await sb().from("folders").delete().eq("id", id));
+  },
+  async countOpenThreads(projectId) {
+    const reviews = must(await sb().from("reviews").select("id").eq("project_id", projectId).returns<{ id: string }[]>());
+    const out: Record<string, OpenThreadCount> = {};
+    // PostgREST puts the id list in the URL, so a big project is asked for in slices
+    for (let i = 0; i < reviews.length; i += 100) {
+      const ids = reviews.slice(i, i + 100).map((r) => r.id);
+      const rows = must(
+        await sb()
+          .from("comments")
+          .select("review_id, author_id, author_name, anchor")
+          .in("review_id", ids)
+          .is("parent_id", null)
+          .eq("resolved", false)
+          .returns<Pick<Comment, "review_id" | "author_id" | "author_name" | "anchor">[]>(),
+      );
+      for (const c of rows) {
+        const n = (out[c.review_id] ??= { open: 0, dev: 0 });
+        if (isDevComment(c)) n.dev++;
+        else n.open++;
+      }
+    }
+    return out;
   },
 
   async createReview(r) {

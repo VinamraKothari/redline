@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, reviewAccess } from "@/lib/auth/server";
 import { assertCanAddPage } from "@/lib/billing/entitlements";
+import { folderRefusal } from "@/lib/folders";
 import type { Review } from "@/lib/types";
 import { publicReview } from "@/lib/review";
 
@@ -34,7 +35,20 @@ export const PATCH = guarded(async (req: NextRequest, ctx: RouteContext<"/api/re
     // …and room under that project's plan, like any other new page there.
     await assertCanAddPage(body.project_id, review.mode, user.id);
     patch.project_id = body.project_id;
+    // folders belong to a project, so the page lands at the other project's root
+    if (review.folder_id) patch.folder_id = null;
     await d.updateProject(body.project_id, {});
+  } else if (body.folder_id !== undefined && review.project_id) {
+    // Move into a folder of this project (null = back to the root).
+    if (body.folder_id === null) {
+      if (review.folder_id) patch.folder_id = null;
+    } else if (typeof body.folder_id === "string") {
+      const refusal = await folderRefusal(d, review.project_id, body.folder_id);
+      if (refusal) return Response.json({ error: refusal }, { status: 400 });
+      patch.folder_id = body.folder_id;
+    } else {
+      return Response.json({ error: "bad folder" }, { status: 400 });
+    }
   }
   const updated = await d.updateReview(id, patch);
   if (review.project_id) await d.updateProject(review.project_id, {});

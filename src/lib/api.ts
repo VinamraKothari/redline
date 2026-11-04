@@ -1,6 +1,6 @@
 "use client";
 
-import type { Anchor, Attachment, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
+import type { Anchor, Attachment, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
 import type { PublicReview } from "./review";
 import type { Interval, PlanId } from "./billing/plans";
 import type { PlanSource } from "./billing/entitlements";
@@ -128,9 +128,15 @@ export const api = {
     return call<{ project: ProjectSummary }>("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
   },
   loadProject(id: string) {
-    return call<{ project: Project & { role: Role }; reviews: PublicReview[]; members: ProjectMember[]; invites: ProjectInvite[] }>(`/api/projects/${id}`, {
-      cache: "no-store",
-    });
+    return call<{
+      project: Project & { role: Role };
+      reviews: PublicReview[];
+      folders: Folder[];
+      /** unresolved threads per review id; pages with none are absent */
+      counts: Record<string, OpenThreadCount>;
+      members: ProjectMember[];
+      invites: ProjectInvite[];
+    }>(`/api/projects/${id}`, { cache: "no-store" });
   },
   renameProject(id: string, name: string) {
     return call<{ project: Project }>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
@@ -154,8 +160,24 @@ export const api = {
     return call<{ ok: true }>(`/api/projects/${projectId}/members?invite=${encodeURIComponent(inviteId)}`, { method: "DELETE" });
   },
 
+  /* folders */
+  createFolder(projectId: string, name: string) {
+    return call<{ folder: Folder }>(`/api/projects/${projectId}/folders`, { method: "POST", body: JSON.stringify({ name }) });
+  },
+  renameFolder(projectId: string, folderId: string, name: string) {
+    return call<{ folder: Folder }>(`/api/projects/${projectId}/folders/${folderId}`, { method: "PATCH", body: JSON.stringify({ name }) });
+  },
+  /** the folder's pages go back to the project root */
+  deleteFolder(projectId: string, folderId: string) {
+    return call<{ ok: true }>(`/api/projects/${projectId}/folders/${folderId}`, { method: "DELETE" });
+  },
+  /** put a page in a folder of its project; null = back to the root */
+  moveToFolder(reviewId: string, folderId: string | null) {
+    return api.patchReview(reviewId, { folder_id: folderId });
+  },
+
   /* reviews */
-  createReview(body: { project_id: string; url?: string; viewport?: number; mode?: "live" | "upload" | "frozen"; html?: string; title?: string }) {
+  createReview(body: { project_id: string; folder_id?: string | null; url?: string; viewport?: number; mode?: "live" | "upload" | "frozen"; html?: string; title?: string }) {
     return postJson<{ review: PublicReview }>("/api/reviews", body);
   },
   loadReview(id: string) {

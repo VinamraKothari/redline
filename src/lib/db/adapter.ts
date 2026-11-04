@@ -1,4 +1,4 @@
-import type { AdminUserRow, AuditEntry, Comment, GrantCode, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Storage adapter. Two implementations:
@@ -57,6 +57,21 @@ export interface DbAdapter {
   deleteInvite(id: string): Promise<void>;
   /** turn pending invites for this e-mail into memberships */
   claimInvites(userId: string, email: string): Promise<void>;
+
+  /* folders (migration 008) — one level deep; on Supabase every read tolerates the missing table */
+  /** ordered by position, then created_at */
+  listFolders(projectId: string): Promise<Folder[]>;
+  getFolder(id: string): Promise<Folder | null>;
+  createFolder(f: Folder): Promise<Folder>;
+  updateFolder(id: string, patch: Partial<Folder>): Promise<Folder | null>;
+  /** the folder's pages go back to the project root first; pages are never deleted with a folder */
+  deleteFolder(id: string): Promise<void>;
+  /**
+   * Unresolved thread roots of every page in the project, keyed by review id
+   * and split into people's threads (`open`) and generated developer threads
+   * (`dev`, "Compare with Figma"). Pages without open threads are absent.
+   */
+  countOpenThreads(projectId: string): Promise<Record<string, OpenThreadCount>>;
 
   createReview(r: Review): Promise<Review>;
   getReview(id: string): Promise<Review | null>;

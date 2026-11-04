@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { guarded, projectAccess, syncProfile } from "@/lib/auth/server";
 import { assertCanAddPage } from "@/lib/billing/entitlements";
+import { folderRefusal } from "@/lib/folders";
 import { publicReview } from "@/lib/review";
 import type { Review } from "@/lib/types";
 import { hostOf, newKey, newSlug, normalizeUrl } from "@/lib/util";
@@ -26,11 +27,18 @@ export const POST = guarded(async (req: NextRequest) => {
       mode?: "live" | "upload" | "frozen";
       html?: string;
       title?: string;
+      /** a folder of the project to create the page in */
+      folder_id?: string | null;
     }>(req)) ?? {};
   if (!body.project_id) return Response.json({ error: "Pick a project first." }, { status: 400 });
   const { user, role } = await projectAccess(body.project_id, "edit");
   await assertCanAddPage(body.project_id, body.mode === "upload" ? "upload" : body.mode === "frozen" ? "frozen" : "live", user.id);
   const profile = await syncProfile(user);
+  const d = await db();
+  if (body.folder_id) {
+    const refusal = await folderRefusal(d, body.project_id, body.folder_id);
+    if (refusal) return Response.json({ error: refusal }, { status: 400 });
+  }
 
   let url: string | null = null;
   if (body.mode === "upload") {
@@ -66,8 +74,9 @@ export const POST = guarded(async (req: NextRequest) => {
     created_at: now,
     updated_at: now,
   };
+  // only set when asked for: an absent key keeps inserts working on a database without migration 008
+  if (body.folder_id) review.folder_id = body.folder_id;
 
-  const d = await db();
   if (body.mode === "upload" && body.html) {
     review.snapshot_path = `${review.id}/upload.html`;
     await d.putSnapshot(review.snapshot_path, body.html);

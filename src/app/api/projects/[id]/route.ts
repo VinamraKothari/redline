@@ -6,17 +6,29 @@ import { publicReview } from "@/lib/review";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** A project with its reviews, members and (for admins) pending invites. */
+/**
+ * A project with its reviews, folders, members and (for admins) pending
+ * invites, plus `counts`: unresolved threads per review, so the page cards can
+ * wear a badge without anyone opening them.
+ */
 export const GET = guarded(async (_req: NextRequest, ctx: RouteContext<"/api/projects/[id]">) => {
   const { id } = await ctx.params;
   const { user, role } = await projectAccess(id);
   const d = await db();
   const project = await d.getProject(id);
   if (!project) return Response.json({ error: "not found" }, { status: 404 });
-  const [reviews, members, invites] = await Promise.all([d.listReviews(id), d.listMembers(id), role === "admin" ? d.listInvites(id) : Promise.resolve([])]);
+  const [reviews, folders, counts, members, invites] = await Promise.all([
+    d.listReviews(id),
+    d.listFolders(id),
+    d.countOpenThreads(id),
+    d.listMembers(id),
+    role === "admin" ? d.listInvites(id) : Promise.resolve([]),
+  ]);
   return Response.json({
     project: { ...project, role },
     reviews: reviews.map((r) => publicReview(r, role, user.id)),
+    folders,
+    counts,
     members,
     invites,
   });

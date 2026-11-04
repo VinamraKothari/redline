@@ -92,6 +92,27 @@ export interface Project {
   updated_at: string;
 }
 
+/**
+ * A folder inside a project — one level deep, never nested. Pages point at
+ * it with `folder_id`; a page without one sits at the project root.
+ */
+export interface Folder {
+  id: string;
+  project_id: string;
+  name: string;
+  /** manual order among the project's folders; ties broken by created_at */
+  position: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Unresolved thread roots of a page, split into people's comments and generated developer comments. */
+export interface OpenThreadCount {
+  open: number;
+  dev: number;
+}
+
 export interface ProjectMember {
   project_id: string;
   user_id: string;
@@ -114,6 +135,8 @@ export interface ProjectInvite {
 export interface Review {
   id: string; // short slug used in URLs
   project_id: string | null;
+  /** folder inside the project; missing or null = project root (optional so rows from before migration 008 keep working) */
+  folder_id?: string | null;
   url: string;
   title: string;
   mode: ReviewMode;
