@@ -74,6 +74,10 @@ For end-to-end tests (`REDLINE_TEST_AUTH=1`, never on Vercel) the login page off
 PW_CHROMIUM=/path/to/chrome bash scripts/e2e.sh
 ```
 
+## Agent API
+
+Read-only, token-protected feedback access for coding agents: `bash scripts/bugs.sh`. See [docs/agent-api.md](docs/agent-api.md).
+
 ## Jira import
 
 Share → Export → **Jira CSV**, then in Jira: Settings → System → External system import → CSV. The columns Summary, Description, Issue Type, Priority, Status, Labels, Reporter, Created, Comment and Attachment map automatically; `Redline URL`, `Element` and `Viewport` can go to custom fields or be skipped. Dates use Jira's default `dd/MMM/yy h:mm a` format.
