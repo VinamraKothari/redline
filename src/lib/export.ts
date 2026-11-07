@@ -19,7 +19,8 @@ export function jiraDate(iso: string): string {
   return `${dd}/${mon}/${yy} ${h}:${mm} ${ampm}`;
 }
 
-function plain(text: string): string {
+/** Mentions are stored as `@[Name]`; exports show them as `@Name`. */
+export function plain(text: string): string {
   return text.replace(/@\[([^\]]+)\]/g, "@$1");
 }
 
@@ -68,14 +69,22 @@ function jiraAttachment(origin: string, c: Comment, att: Comment["attachments"][
   }
   const ext = att.url.startsWith("data:image/png") ? "png" : att.url.startsWith("data:image/webp") ? "webp" : /\.png(\?|$)/i.test(att.url) ? "png" : "jpg";
   const base = (att.name || "image").replace(/[^\w.-]+/g, "-").replace(/\.[^.]+$/, "") || "image";
-  // files already in storage are public; inline (older) images are served by /api/attachments
-  const url = /^https?:\/\//i.test(att.url) ? att.url : att.url.startsWith("/") ? absolute(origin, att.url) : attachmentUrl(origin, c, att);
-  return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${url}`;
+  return `${jiraDate(c.created_at)};${c.author_name};${base}.${ext};${fileUrl(origin, c, att)}`;
 }
 
 /** Storage URLs are absolute in production; the local adapter serves relative ones. */
 function absolute(origin: string, url: string): string {
   return url.startsWith("/") ? origin + url : url;
+}
+
+/**
+ * A downloadable absolute URL for any attachment: files already in storage are
+ * public; inline (older) data: images are served by /api/attachments.
+ */
+export function fileUrl(origin: string, c: Comment, att: Comment["attachments"][number]): string {
+  if (/^https?:\/\//i.test(att.url)) return att.url;
+  if (att.url.startsWith("/")) return absolute(origin, att.url);
+  return attachmentUrl(origin, c, att);
 }
 
 /** Order of threads in the CSV = numbering of the markers on the rendered screenshots. */
