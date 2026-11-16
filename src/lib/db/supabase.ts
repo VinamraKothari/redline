@@ -40,6 +40,10 @@ export const supabaseDb: DbAdapter = {
     if (!ids.length) return [];
     return must(await sb().from("profiles").select().in("id", ids).returns<Profile[]>());
   },
+  async getProfileByEmail(email) {
+    const { data } = await sb().from("profiles").select().ilike("email", email).limit(1).maybeSingle<Profile>();
+    return data ?? null;
+  },
   async upsertProfile(p) {
     return must(await sb().from("profiles").upsert(p).select().single<Profile>());
   },

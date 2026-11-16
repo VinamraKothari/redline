@@ -76,6 +76,11 @@ const impl: DbAdapter = {
     const s = await load();
     return ids.map((i) => s.profiles[i]).filter(Boolean);
   },
+  async getProfileByEmail(email) {
+    const s = await load();
+    const needle = email.toLowerCase();
+    return Object.values(s.profiles).find((p) => p.email.toLowerCase() === needle) ?? null;
+  },
   async upsertProfile(p) {
     const s = await load();
     s.profiles[p.id] = p;

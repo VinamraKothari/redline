@@ -39,8 +39,9 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   const review = await (await page.request.get(`/api/reviews/${reviewId}`)).json();
   const pid = review.review.project_id as string;
 
-  // invite a viewer (who has never signed in) and an editor
-  const inv = await page.request.post(`/api/projects/${pid}/members`, { data: { email: "sam-viewer@example.test", role: "view" } });
+  // invite a viewer who has never signed in (a fresh name per run: an existing account would join at once instead)
+  const sam = `Sam ${Math.random().toString(36).slice(2, 7)} Viewer`; // the token sits early: the test id is derived from the first characters of the slug
+  const inv = await page.request.post(`/api/projects/${pid}/members`, { data: { email: `${sam.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@example.test`, role: "view" } });
   expect(inv.ok()).toBeTruthy();
   expect((await inv.json()).invite).toBeTruthy();
 
@@ -52,7 +53,7 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   // and the page switcher lists both pages of the project
   const viewerCtx = await browser.newContext();
   const vp = await viewerCtx.newPage();
-  await signIn(vp, "Sam Viewer");
+  await signIn(vp, sam);
   const vp2 = vp;
   await vp.goto(url);
   await expect(vp.frameLocator('iframe[title="Page under review"]').locator("h1")).toHaveText("Ship better design reviews");
@@ -66,20 +67,21 @@ test("projects: invite by e-mail with a role, viewers can't edit, non-members ca
   });
   expect(denied.status()).toBe(403);
 
-  // a stranger gets a 404, not the page
+  // a stranger gets a "no access" page naming their account, not the review; the API says 404
   const strangerCtx = await browser.newContext();
   const sp = await strangerCtx.newPage();
-  await signIn(sp, "Eve Stranger");
-  const res = await sp.goto(url);
-  expect(res?.status()).toBe(404);
+  const eve = await signIn(sp, "Eve Stranger");
+  await sp.goto(url);
+  await expect(sp.getByRole("heading", { name: "You don't have access to this review" })).toBeVisible();
+  await expect(sp.getByText(eve.email)).toBeVisible();
   expect((await sp.request.get(`/api/reviews/${reviewId}`)).status()).toBe(404);
   await strangerCtx.close();
 
   // members dialog shows the viewer with their role
   await page.goto(`/p/${pid}`);
   await page.getByRole("button", { name: /member/ }).click();
-  await expect(page.getByText("Sam Viewer")).toBeVisible();
-  await expect(page.getByLabel("Role of Sam Viewer")).toHaveValue("view");
+  await expect(page.getByText(sam)).toBeVisible();
+  await expect(page.getByLabel(`Role of ${sam}`)).toHaveValue("view");
   await page.keyboard.press("Escape");
 
   // page management: rename from the tile menu, move to another project

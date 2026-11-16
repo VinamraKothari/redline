@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { currentUser } from "@/lib/auth/server";
+import { currentUser, projectRole } from "@/lib/auth/server";
+import { NoAccess } from "@/components/auth/NoAccess";
 import { ProjectHome } from "@/components/home/ProjectHome";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function ProjectPage({ params }: PageProps<"/p/[id]">) {
   const d = await db();
   const project = await d.getProject(id);
   if (!project) notFound();
-  const role = await d.memberRole(id, user.id);
-  if (!role) notFound();
+  const role = await projectRole(id, user);
+  if (!role) return <NoAccess kind="project" email={user.email} />;
   return <ProjectHome id={id} />;
 }

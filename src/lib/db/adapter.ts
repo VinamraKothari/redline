@@ -9,6 +9,8 @@ export interface DbAdapter {
   /* identity */
   getProfile(id: string): Promise<Profile | null>;
   getProfilesByIds(ids: string[]): Promise<Profile[]>;
+  /** the account signed in with this e-mail (case-insensitive), if any */
+  getProfileByEmail(email: string): Promise<Profile | null>;
   upsertProfile(p: Profile): Promise<Profile>;
   /** per-account preferences (own table, so a missing migration only affects settings) */
   getSettings(userId: string): Promise<UserSettings>;

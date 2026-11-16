@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-11-16",
+    title: "Shared links work the moment you're invited",
+    tag: "fixed",
+    items: [
+      "Inviting someone who already uses Redline adds them to the project right away — before, their access only arrived after they had opened another Redline page, so a shared link could look dead.",
+      "Opening a project or review you're not a member of now says so, shows which account you're signed in with, and offers to switch accounts — instead of a generic “doesn't exist” page.",
+    ],
+  },
+  {
     date: "2026-11-04",
     title: "Folders inside projects and unresolved-comment badges on page cards",
     tag: "new",

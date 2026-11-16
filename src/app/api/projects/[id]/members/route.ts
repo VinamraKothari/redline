@@ -27,11 +27,20 @@ export const POST = guarded(async (req: NextRequest, ctx: RouteContext<"/api/pro
   if (!known && !pending) await assertCanInvite(id, user.id);
   const invite: ProjectInvite = { id: newId(), project_id: id, email, role, invited_by: user.id, created_at: new Date().toISOString(), accepted_at: null };
   await d.upsertInvite(invite);
-  // If that Google account already exists, membership applies right away.
+  // If that Google account already exists, membership applies right away — whether the
+  // person is already in this project (a role change) or has only used Redline elsewhere.
+  // Otherwise the invite waits for their first sign-in.
   if (known) {
     await d.setMember(id, known.user_id, role);
     await d.deleteInvite(invite.id);
     return Response.json({ member: { ...known, role }, invite: null });
+  }
+  const account = await d.getProfileByEmail(email);
+  if (account) {
+    await d.setMember(id, account.id, role);
+    await d.deleteInvite(invite.id);
+    const member = (await d.listMembers(id)).find((m) => m.user_id === account.id) ?? null;
+    return Response.json({ member, invite: null });
   }
   return Response.json({ member: null, invite });
 });

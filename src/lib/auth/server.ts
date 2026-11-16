@@ -118,9 +118,17 @@ export async function syncProfile(u: SessionUser): Promise<Profile> {
   return profile;
 }
 
-/** Role of `user` in `projectId`, or null when not a member. */
+/**
+ * Role of `user` in `projectId`, or null when not a member. A non-member's
+ * pending invites are claimed first, so a link opened right after being
+ * invited works even when the person was already signed in (the usual
+ * claim happens on sign-in and on /api/me, which a direct link skips).
+ */
 export async function projectRole(projectId: string, user: SessionUser): Promise<Role | null> {
   const d = await db();
+  const role = await d.memberRole(projectId, user.id);
+  if (role) return role;
+  await d.claimInvites(user.id, user.email);
   return d.memberRole(projectId, user.id);
 }
 
@@ -134,7 +142,7 @@ export async function reviewAccess(reviewId: string, min: Role = "view"): Promis
   const d = await db();
   const review = await d.getReview(reviewId);
   if (!review || !review.project_id) throw new HttpError(404, "This review doesn't exist or you don't have access to it.");
-  const role = await d.memberRole(review.project_id, user.id);
+  const role = await projectRole(review.project_id, user);
   if (!role) throw new HttpError(404, "This review doesn't exist or you don't have access to it.");
   if (!atLeast(role, min)) throw new HttpError(403, min === "admin" ? "Only project admins can do that." : "You have view-only access to this project.");
   return { user, review, role };
