@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, Code2, GitCompareArrows, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
+import { Camera, ChevronDown, Code2, GitCompareArrows, KeyRound, LogOut, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { AccountMenu } from "@/components/home/AccountMenu";
 import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tip, Button } from "@/components/ui/primitives";
@@ -10,6 +10,7 @@ import { VIEWPORTS } from "@/lib/types";
 import { api } from "@/lib/api";
 import { frame } from "@/lib/frame/controller";
 import { serializeDocument } from "@/lib/frame/dom";
+import { forgetSiteSession, useSiteSessionSync } from "@/lib/site-session";
 import { hostOf, cn } from "@/lib/util";
 import { ShareDialog } from "./ShareDialog";
 import { CaptureStateDialog } from "./CaptureStateDialog";
@@ -123,6 +124,7 @@ export function TopBar() {
             {hostOf(review.url)}
           </a>
         )}
+        {review?.mode === "live" && <SiteLogin />}
         {review?.mode === "frozen" && (
           <span className="inline-flex items-center gap-1 rounded-full bg-blue-soft px-2 py-0.5 text-[11px] font-medium text-blue">
             <Snowflake size={11} /> Frozen
@@ -263,5 +265,42 @@ export function TopBar() {
         <AccountMenu size={26} />
       </div>
     </header>
+  );
+}
+
+/**
+ * "Signed in to <site>": a login landed on the reviewed site for this
+ * account (someone signed in there in Browse mode); "Forget login" drops it.
+ * Cookies the site set without a login are not announced here — nearly every
+ * site sets some — but the page menu offers "Forget session" for them. Hidden
+ * on narrow screens like the host link next to it.
+ */
+function SiteLogin() {
+  useSiteSessionSync();
+  const session = useStore((s) => s.siteSession);
+  if (!session?.signedIn) return null;
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          className="hidden h-6 shrink-0 items-center gap-1 rounded-full bg-hover px-2 text-[11px] font-medium text-ink-2 hover:text-ink md:inline-flex"
+          title={`Redline keeps your login on ${session.site} for this account`}
+          aria-label={`Signed in to ${session.site}`}
+        >
+          <KeyRound size={11} className="text-green" />
+          <span className="max-w-[160px] truncate">Signed in to {session.site}</span>
+          <ChevronDown size={11} className="text-ink-3" />
+        </button>
+      </MenuTrigger>
+      <MenuContent align="start" className="w-[260px]">
+        <MenuLabel>Login on {session.site}</MenuLabel>
+        <div className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-3">Kept for your Redline account only — teammates sign in themselves.</div>
+        <MenuSeparator />
+        <MenuItem onSelect={forgetSiteSession}>
+          <LogOut size={13} className="text-ink-2" /> Forget login
+        </MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }

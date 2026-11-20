@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
 import { isDevComment } from "@/lib/figma/dev";
 
 /**
@@ -19,6 +19,7 @@ interface Store {
   members: Record<string, ProjectMember>; // key: project_id/user_id
   invites: Record<string, ProjectInvite>;
   reads: Record<string, Record<string, string>>; // key: user_id/review_id
+  siteSessions: Record<string, { cookies: StoredSiteCookies; updated_at: string }>; // key: user_id/site
   settings: Record<string, UserSettings>; // key: user_id
   subscriptions: Record<string, Subscription>; // key: user_id
   figmaRuns: { user_id: string; review_id: string; at: string }[];
@@ -28,7 +29,7 @@ interface Store {
   audit: AuditEntry[];
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, folders: {}, members: {}, invites: {}, reads: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, folders: {}, members: {}, invites: {}, reads: {}, siteSessions: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
 /** folder order: manual position first, then age */
 const byPosition = (a: Folder, b: Folder) => a.position - b.position || a.created_at.localeCompare(b.created_at);
 
@@ -204,6 +205,7 @@ const impl: DbAdapter = {
     const s2 = await load();
     for (const [k, m] of Object.entries(s2.members)) if (m.user_id === userId) delete s2.members[k];
     for (const [k, r] of Object.entries(s2.reads)) if (k.startsWith(userId + "/")) delete s2.reads[k];
+    for (const k of Object.keys(s2.siteSessions)) if (k.startsWith(userId + "/")) delete s2.siteSessions[k];
     // what they wrote in other people's projects stays, unattributed — the same as Postgres's `on delete set null`
     for (const c of Object.values(s2.comments)) if (c.author_id === userId) c.author_id = null;
     for (const sh of Object.values(s2.shapes)) if (sh.author_id === userId) sh.author_id = null;
@@ -484,6 +486,29 @@ const impl: DbAdapter = {
     } catch {
       return null;
     }
+  },
+
+  /* site sessions */
+  async getSiteCookies(userId, site) {
+    return (await load()).siteSessions[`${userId}/${site}`] ?? null;
+  },
+  async putSiteCookies(userId, site, cookies) {
+    const s = await load();
+    s.siteSessions[`${userId}/${site}`] = { cookies, updated_at: new Date().toISOString() };
+    await persist();
+  },
+  async deleteSiteCookies(userId, site) {
+    const s = await load();
+    delete s.siteSessions[`${userId}/${site}`];
+    await persist();
+  },
+  async listSiteSessions(userId) {
+    const s = await load();
+    const out: SiteSession[] = [];
+    for (const [key, v] of Object.entries(s.siteSessions)) {
+      if (key.startsWith(`${userId}/`)) out.push({ site: key.slice(userId.length + 1), updated_at: v.updated_at });
+    }
+    return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   },
 
   async getReads(userId, reviewId) {

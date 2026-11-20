@@ -1,5 +1,6 @@
-import puppeteer, { type Browser } from "puppeteer-core";
+import puppeteer, { type Browser, type CookieParam } from "puppeteer-core";
 import { fetchableUrl } from "./proxy/hosts";
+import type { SiteCookie } from "./types";
 
 /**
  * Server-side page previews with headless Chromium.
@@ -21,6 +22,36 @@ export interface ShotOptions {
   height?: number;
   /** output width in device px */
   outWidth?: number;
+  /** the account's session on the site (lib/proxy/cookies.ts), so a page behind a login shows the page, not the sign-in form */
+  cookies?: SiteCookie[];
+}
+
+export interface Shot {
+  bytes: Uint8Array;
+  /** the site redirected to a sign-in form (a password field on another path) instead of showing the page */
+  loginForm: boolean;
+}
+
+const pathOf = (u: string) => {
+  try {
+    const x = new URL(u);
+    return x.origin + x.pathname.replace(/\/$/, "");
+  } catch {
+    return u;
+  }
+};
+
+/** Puppeteer's shape of a jar cookie: host-only cookies by URL, domain cookies with the leading dot. */
+function cookieParam(c: SiteCookie, origin: string): CookieParam {
+  return {
+    name: c.name,
+    value: c.value,
+    ...(c.hostOnly ? { url: origin } : { domain: "." + c.domain }),
+    path: c.path,
+    httpOnly: c.httpOnly,
+    secure: c.secure,
+    ...(c.expires ? { expires: Math.floor(c.expires / 1000) } : {}),
+  };
 }
 
 /**
@@ -74,7 +105,7 @@ export async function launchBrowser(width: number, height: number, scale: number
 }
 
 /** JPEG bytes of the top of the page. Throws if nothing could be rendered. */
-export async function screenshotPage(opts: ShotOptions): Promise<Uint8Array> {
+export async function screenshotPage(opts: ShotOptions): Promise<Shot> {
   const width = Math.max(320, Math.min(opts.width, 2560));
   const height = Math.max(400, Math.min(opts.height ?? Math.round(width * 0.75), 2000));
   const scale = Math.min(1, (opts.outWidth ?? 800) / width);
@@ -89,6 +120,10 @@ export async function screenshotPage(opts: ShotOptions): Promise<Uint8Array> {
       await page.setContent(opts.html, { waitUntil: "load", timeout: NAV_TIMEOUT }).catch(() => {});
     } else if (opts.url) {
       if (!fetchableUrl(opts.url)) throw new Error("That address can't be rendered.");
+      if (opts.cookies?.length) {
+        const origin = new URL(opts.url).origin;
+        await page.setCookie(...opts.cookies.map((c) => cookieParam(c, origin))).catch(() => {});
+      }
       // the page may redirect or load sub-resources from private hosts; never follow those
       await page.setRequestInterception(true);
       page.on("request", (r) => {
@@ -118,8 +153,11 @@ export async function screenshotPage(opts: ShotOptions): Promise<Uint8Array> {
       .catch(() => {});
     // let lazy images in the first screen start, then settle
     await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 600))));
+    // a review *of* a login page keeps its preview; one that was sent to a login page does not
+    const loginForm =
+      !!opts.url && pathOf(page.url()) !== pathOf(opts.url) && (await page.evaluate(() => Boolean(document.querySelector('input[type="password"]'))).catch(() => false));
     const shot = await page.screenshot({ type: "jpeg", quality: 80, clip: { x: 0, y: 0, width, height }, captureBeyondViewport: false });
-    return shot instanceof Uint8Array ? shot : new Uint8Array(shot as ArrayBuffer);
+    return { bytes: shot instanceof Uint8Array ? shot : new Uint8Array(shot as ArrayBuffer), loginForm };
   } finally {
     clearTimeout(killer);
     await browser.close().catch(() => {});

@@ -2,20 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, FolderKanban, Plus } from "lucide-react";
+import { Check, ChevronDown, FolderKanban, LogOut, Plus } from "lucide-react";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import type { PublicReview } from "@/lib/review";
 import type { Project } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { forgetSiteSession } from "@/lib/site-session";
 import { hostOf } from "@/lib/util";
 
 /**
  * The review title doubles as a menu of the other pages in the same project,
  * so switching between the pages you're reviewing together is one click.
+ * It also lets go of the cookies the proxy keeps for the reviewed site when
+ * no login set them (a login shows its own pill in the top bar).
  */
 export function PageSwitcher() {
   const review = useStore((s) => s.review);
+  const session = useStore((s) => s.siteSession);
   const [data, setData] = useState<{ project: Project; reviews: PublicReview[] } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -73,6 +77,16 @@ export function PageSwitcher() {
             <Plus size={13} /> Add a page / manage project
           </Link>
         </MenuItem>
+        {session?.kept && !session.signedIn && (
+          <>
+            <MenuSeparator />
+            <MenuLabel>Session on {session.site}</MenuLabel>
+            <div className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-3">The site set cookies; Redline keeps them for your account only.</div>
+            <MenuItem onSelect={forgetSiteSession}>
+              <LogOut size={13} className="text-ink-2" /> Forget session on {session.site}
+            </MenuItem>
+          </>
+        )}
       </MenuContent>
     </Menu>
   );

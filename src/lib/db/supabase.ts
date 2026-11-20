@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
 import { isDevComment } from "@/lib/figma/dev";
 
 const BUCKET = "snapshots";
@@ -15,6 +15,9 @@ const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
  */
 const missingFolders = (message: string) => /(relation|table) ["']public\.folders["']|column .*folder_id.* does not exist|'folder_id' column .*schema cache/i.test(message);
 const FOLDERS_NOT_SET_UP = "Folders are not set up yet — run migration 008 first.";
+/** The `site_sessions` table (migration 009) isn't there yet. */
+const missingSiteSessions = (message: string) => /(relation|table) ["']?public\.site_sessions["']?|site_sessions.*schema cache/i.test(message);
+let warnedSiteSessions = false;
 
 let client: SupabaseClient | null = null;
 function sb(): SupabaseClient {
@@ -453,6 +456,37 @@ export const supabaseDb: DbAdapter = {
     const { data, error } = await sb().storage.from(BUCKET).download(p);
     if (error || !data) return null;
     return await data.text();
+  },
+
+  /* site sessions — table from migration 009; without it, reviews load signed out and the write warns once */
+  async getSiteCookies(userId, site) {
+    const { data, error } = await sb().from("site_sessions").select("cookies, updated_at").eq("user_id", userId).eq("site", site).maybeSingle<{ cookies: StoredSiteCookies; updated_at: string }>();
+    if (error) {
+      if (missingSiteSessions(error.message)) return null;
+      throw new Error(error.message);
+    }
+    return data ?? null;
+  },
+  async putSiteCookies(userId, site, cookies) {
+    const { error } = await sb().from("site_sessions").upsert({ user_id: userId, site, cookies, updated_at: new Date().toISOString() });
+    if (!error) return;
+    if (!missingSiteSessions(error.message)) throw new Error(error.message);
+    if (!warnedSiteSessions) {
+      warnedSiteSessions = true;
+      console.warn("[redline] site_sessions table missing — run supabase/migration-009-site-sessions.sql to keep logins on reviewed sites");
+    }
+  },
+  async deleteSiteCookies(userId, site) {
+    const { error } = await sb().from("site_sessions").delete().eq("user_id", userId).eq("site", site);
+    if (error && !missingSiteSessions(error.message)) throw new Error(error.message);
+  },
+  async listSiteSessions(userId) {
+    const { data, error } = await sb().from("site_sessions").select("site, updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).returns<SiteSession[]>();
+    if (error) {
+      if (missingSiteSessions(error.message)) return [];
+      throw new Error(error.message);
+    }
+    return data ?? [];
   },
 
   /* read state — table from migration 004; missing table degrades to local-only */

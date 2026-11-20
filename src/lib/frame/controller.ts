@@ -15,6 +15,15 @@ export class FrameController {
   private raf = 0;
   private mutationTimer = 0;
   onNavigate: ((url: string, newTab: boolean) => void) | null = null;
+  /**
+   * A proxied document started in the frame (the bridge's first message) —
+   * including ones the host never asked for: a form the browser submitted, a
+   * redirect after a login. `url` is what was requested, `finalUrl` where the
+   * site answered from.
+   */
+  onDocument: ((url: string, finalUrl: string) => void) | null = null;
+  /** the frame landed on a document we can't reach (another origin, e.g. a site that sent itself home after a login) */
+  onEscaped: (() => void) | null = null;
   /** overlay elements that must move with the page (translated by -scroll) */
   private followers = new Set<HTMLElement>();
   /** the page's own scripts destroyed the document (see bridge.ts) */
@@ -30,7 +39,7 @@ export class FrameController {
       if (!d || !d.__redline) return;
       if (e.source !== iframe.contentWindow) return;
       if (d.type === "navigate") this.onNavigate?.(d.url, Boolean(d.newTab || d.popup));
-      if (d.type === "blocked-submit") useStore.getState().toast("Form submissions are disabled while reviewing.");
+      if (d.type === "bridge-hello") this.onDocument?.(String(d.url || ""), String(d.finalUrl || d.url || ""));
       if (d.type === "crashed") this.onCrashed?.(String(d.reason || ""));
       if (d.type === "hover-locked") {
         useStore.getState().set({ hoverLocked: true });
@@ -50,8 +59,7 @@ export class FrameController {
   }
 
   detach() {
-    this.docCleanup.forEach((f) => f());
-    this.docCleanup = [];
+    this.cleanDoc();
     this.cleanup.forEach((f) => f());
     this.cleanup = [];
     this.iframe = null;
@@ -74,14 +82,35 @@ export class FrameController {
     }
   }
 
-  private handleLoad() {
-    // listeners from the previous document (navigation / reload)
-    this.docCleanup.forEach((f) => f());
+  /**
+   * Drop the listeners on the previous document (navigation / reload) — each
+   * in its own try: once the frame is cross-origin, even removeEventListener
+   * on the old window throws, and the escape in handleLoad must still run.
+   */
+  private cleanDoc() {
+    this.docCleanup.forEach((f) => {
+      try {
+        f();
+      } catch {
+        /* the old window is gone */
+      }
+    });
     this.docCleanup = [];
+  }
+
+  private handleLoad() {
+    this.cleanDoc();
     const doc = this.doc;
     const win = this.win;
     const st = useStore.getState();
     if (!doc || !win) {
+      // A window we can't look into is a cross-origin document: the page left
+      // the proxy (a browser without the Navigation API let a post-login
+      // `location.href = "https://site/…"` through). The host brings it back.
+      if (this.iframe?.contentWindow && this.onEscaped) {
+        this.onEscaped();
+        return;
+      }
       st.set({ frameReady: false, frameError: "The page could not be accessed." });
       return;
     }

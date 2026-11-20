@@ -2,7 +2,9 @@ import { expect, type Page } from "@playwright/test";
 
 /**
  * End-to-end smoke test of the review flow against the local fixture site.
- * Requires: fixture server on :3999 and the app started with REDLINE_ALLOW_LOCAL=1.
+ * Requires: the fixture server on :3999 (`cd tests/fixtures && python3 server.py 3999` —
+ * static files as http.server serves them, plus the login flow for login.spec.ts)
+ * and the app started with REDLINE_ALLOW_LOCAL=1.
  */
 export const FIXTURE = process.env.FIXTURE_URL || "http://localhost:3999/site.html";
 

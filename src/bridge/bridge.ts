@@ -165,25 +165,77 @@
     true,
   );
 
-  document.addEventListener(
-    "submit",
-    (e) => {
-      const form = e.target as HTMLFormElement;
-      const method = (form.getAttribute("method") || "get").toLowerCase();
-      if (method === "get") {
-        e.preventDefault();
-        const action = form.getAttribute("action") || finalUrl;
-        const url = new URL(action, finalUrl);
-        const fd = new FormData(form);
-        fd.forEach((v, k) => url.searchParams.set(k, String(v)));
-        post({ type: "navigate", url: url.toString() });
-      } else {
-        e.preventDefault();
-        post({ type: "blocked-submit" });
-      }
-    },
-    true,
-  );
+  // Forms, in the bubble phase so the page's own handler runs first: a
+  // React/Vue login form calls preventDefault() and posts with fetch(), which
+  // the proxy already carries — stepping in before it would turn the form's
+  // fields (the password among them) into a GET query string. GET forms
+  // navigate with their fields in the query, as the browser would; POST forms
+  // are submitted by the browser to the proxy, which follows the redirects
+  // and answers with the next page, so the frame simply shows it.
+  /**
+   * Route a form that is about to be submitted. Returns true when the bridge
+   * took the navigation itself (a GET form: the host loads the URL with the
+   * fields in its query); otherwise the form's action now points at the
+   * proxy and the browser may go ahead.
+   */
+  const routeForm = (form: HTMLFormElement, submitter: HTMLElement | null): boolean => {
+    const method = (submitter?.getAttribute("formmethod") || form.getAttribute("method") || "get").toLowerCase();
+    const action = submitter?.getAttribute("formaction") || form.getAttribute("action") || finalUrl;
+    const abs = siteUrlFor(action);
+    if (!abs) return false;
+    if (method === "get") {
+      const url = new URL(abs);
+      new FormData(form).forEach((v, k) => url.searchParams.set(k, String(v)));
+      post({ type: "navigate", url: url.toString() });
+      return true;
+    }
+    // the attribute, not form.action — a field named "action" shadows that property
+    form.setAttribute("action", proxied(abs));
+    return false;
+  };
+  window.addEventListener("submit", (e) => {
+    if (e.defaultPrevented) return;
+    const form = e.target as HTMLFormElement;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (routeForm(form, (e as SubmitEvent).submitter as HTMLElement | null)) e.preventDefault();
+  });
+  // jQuery-era logins call form.submit(), which fires no submit event
+  // (requestSubmit() does, and is covered above): route it the same way
+  const nativeSubmit = HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit = function (this: HTMLFormElement) {
+    try {
+      if (routeForm(this, null)) return;
+    } catch {
+      /* submit as is */
+    }
+    return nativeSubmit.call(this);
+  };
+
+  // Where a page sends itself after a script-driven login: NextAuth and
+  // friends do `window.location.href = data.url` with the site's absolute
+  // URL, which would carry the frame off to the real origin (and out of
+  // Redline). The Navigation API sees every such navigation — location.href,
+  // assign(), replace(), meta refresh — before it starts; hand it to the host,
+  // which loads the page through the proxy. Browsers without the API keep the
+  // previous behaviour (the host notices the frame left and reloads).
+  type NavigateEvent = Event & { destination: { url: string; sameDocument: boolean }; navigationType: string; hashChange: boolean; downloadRequest: string | null; formData: FormData | null };
+  const nav = (window as Window & { navigation?: EventTarget }).navigation;
+  if (nav) {
+    nav.addEventListener("navigate", (ev) => {
+      const e = ev as NavigateEvent;
+      // SPA routers push/replace state all the time: same-document, not ours
+      // to touch. A form submission carries its fields as formData — the
+      // submit handling above already pointed it at the proxy, and loading
+      // its action as a GET here would drop the fields (the password).
+      if (!e.cancelable || e.destination.sameDocument || e.navigationType === "traverse" || e.hashChange || e.downloadRequest || e.formData) return;
+      // A path on our origin is the site's own path (see the replaceState
+      // above); the proxy and the bridge itself stay as they are.
+      const target = siteUrlFor(e.destination.url);
+      if (!target) return;
+      e.preventDefault();
+      post({ type: "navigate", url: target });
+    });
+  }
 
   // ── Hover lock ───────────────────────────────────────────────────────────
   // Menus, tooltips and hover cards vanish the moment the pointer leaves for

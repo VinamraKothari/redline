@@ -1,4 +1,4 @@
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
 
 /**
  * Storage adapter. Two implementations:
@@ -97,7 +97,16 @@ export interface DbAdapter {
   deleteShape(id: string): Promise<void>;
   deleteShapes(reviewId: string, viewport: number | null): Promise<void>;
 
-  /** snapshot html storage */
+  /**
+   * Site sessions (migration 009): the cookies a reviewed site set for one
+   * account, keyed by the site (see lib/proxy/cookies.ts#siteKeyOf). On
+   * Supabase every read tolerates the missing table; writes warn once.
+   */
+  getSiteCookies(userId: string, site: string): Promise<{ cookies: StoredSiteCookies; updated_at: string } | null>;
+  putSiteCookies(userId: string, site: string, cookies: StoredSiteCookies): Promise<void>;
+  deleteSiteCookies(userId: string, site: string): Promise<void>;
+  listSiteSessions(userId: string): Promise<SiteSession[]>;
+
   /** per-user read state of a review's threads (thread id -> ISO read time, "!" + time = marked unread) */
   getReads(userId: string, reviewId: string): Promise<Record<string, string>>;
   putReads(userId: string, reviewId: string, reads: Record<string, string>): Promise<void>;

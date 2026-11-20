@@ -4,6 +4,7 @@ import { create } from "zustand";
 import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, UserSettings, Viewer } from "./types";
 import type { PublicReview } from "./review";
 import type { ElementInfo, Rect } from "./frame/dom";
+import type { SiteSessionState } from "./site-session";
 
 export type Mode = "browse" | "comment" | "draw" | "inspect";
 export type Panel = "comments" | "inspect" | null;
@@ -58,6 +59,10 @@ interface State {
   frameReady: boolean;
   frameError: string | null;
   navigatedAway: string | null;
+  /** the site answered the reviewed page with its sign-in page (a redirect to a login form) */
+  loginPage: boolean;
+  /** what the proxy keeps for this account on the reviewed site (null until checked) */
+  siteSession: SiteSessionState | null;
   /** run the reviewed site's own scripts (off = static render) */
   scripts: boolean;
   /** the page's hover/focus state is pinned (bridge "hover lock") */
@@ -138,6 +143,8 @@ export const useStore = create<State>((set, get) => ({
   frameReady: false,
   frameError: null,
   navigatedAway: null,
+  loginPage: false,
+  siteSession: null,
   scripts: true,
   hoverLocked: false,
   layoutTick: 0,

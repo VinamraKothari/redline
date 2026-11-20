@@ -107,6 +107,37 @@ export interface Folder {
   updated_at: string;
 }
 
+/**
+ * One cookie a reviewed site set, kept by the proxy for one Redline account
+ * (see lib/proxy/cookies.ts). `domain` is lower-case without a leading dot;
+ * `expires` is epoch ms, null for a session cookie.
+ */
+export interface SiteCookie {
+  name: string;
+  value: string;
+  domain: string;
+  hostOnly: boolean;
+  path: string;
+  expires: number | null;
+  secure: boolean;
+  httpOnly: boolean;
+  /**
+   * Set while answering a successful write (a login form or API call,
+   * including the redirects that follow it) — a session, most likely. CSRF
+   * and tracking cookies arrive on plain GETs and don't count as "signed in".
+   */
+  auth?: boolean;
+}
+
+/** How a site's cookies sit in storage: plain, or AES-GCM sealed when REDLINE_SITE_SESSION_KEY is set. */
+export type StoredSiteCookies = SiteCookie[] | { enc: string };
+
+/** A site the account has signed in to through the proxy. */
+export interface SiteSession {
+  site: string;
+  updated_at: string;
+}
+
 /** Unresolved thread roots of a page, split into people's comments and generated developer comments. */
 export interface OpenThreadCount {
   open: number;

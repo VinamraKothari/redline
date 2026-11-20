@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-11-20",
+    title: "Review pages behind a login",
+    tag: "new",
+    items: [
+      "Review pages behind a login — sign in once in Browse mode; Redline keeps the session for your account. The top bar shows “Signed in to <site>” while it does; “Forget login” signs you out again. Teammates sign in themselves — nobody shares a session.",
+      "Forms inside a reviewed page now work the way the site built them: a React or Vue login posts as it would on the real site, and a classic form submits to the site and shows the next page. Before, every form was blocked or turned into a query string.",
+    ],
+  },
+  {
     date: "2026-11-16",
     title: "Shared links work the moment you're invited",
     tag: "fixed",

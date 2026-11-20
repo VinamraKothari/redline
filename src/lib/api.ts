@@ -251,6 +251,13 @@ export const api = {
   putReads(reviewId: string, reads: Record<string, string>) {
     return call<{ reads: Record<string, string> }>(`/api/reviews/${reviewId}/reads`, { method: "PUT", body: JSON.stringify({ reads }) });
   },
+  /** is this account signed in to the reviewed site (`signedIn`), or does the proxy keep any of its cookies at all (`kept`)? */
+  siteSession(url: string) {
+    return call<{ site: string; signedIn: boolean; kept: boolean; updated_at: string | null }>(`/api/proxy/session?url=${encodeURIComponent(url)}`, { cache: "no-store" });
+  },
+  forgetSiteSession(url: string) {
+    return call<{ site: string; signedIn: false; kept: false }>(`/api/proxy/session?url=${encodeURIComponent(url)}`, { method: "DELETE" });
+  },
   figmaStatus() {
     return call<{ configured: boolean }>("/api/figma", { cache: "no-store" });
   },

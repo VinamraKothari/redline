@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ExternalLink, Minimize2, MessageCircle, MessageCircleOff, MousePointerClick } from "lucide-react";
+import { ArrowLeft, ExternalLink, KeyRound, Minimize2, MessageCircle, MessageCircleOff, MousePointerClick } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
@@ -20,6 +20,29 @@ import { Button, IconButton, Tip } from "@/components/ui/primitives";
 /** iframe src for a live page; `scripts=false` asks the proxy for a static render */
 export function proxySrc(url: string, scripts: boolean): string {
   return `/api/proxy?url=${encodeURIComponent(url)}${scripts ? "" : "&js=0"}`;
+}
+
+/** the same page: origin and path — a login sends people back with `?from=login`, a hash or a trailing slash */
+function samePage(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    try {
+      const x = new URL(u);
+      return x.origin + x.pathname.replace(/\/$/, "");
+    } catch {
+      return u;
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/** "host/path" for the banner — the path is what tells /account from /login */
+function placeOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return hostOf(url) + (u.pathname === "/" ? "" : u.pathname);
+  } catch {
+    return url;
+  }
 }
 
 export interface StageGeom {
@@ -40,6 +63,7 @@ export function Stage() {
   const frameReady = useStore((s) => s.frameReady);
   const frameError = useStore((s) => s.frameError);
   const navigatedAway = useStore((s) => s.navigatedAway);
+  const loginPage = useStore((s) => s.loginPage);
   const showComments = useStore((s) => s.showComments);
   const scripts = useStore((s) => s.scripts);
   const hoverLocked = useStore((s) => s.hoverLocked);
@@ -47,6 +71,8 @@ export function Stage() {
 
   const stageRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** where the document now in the frame came from (the bridge's first message) */
+  const landed = useRef<{ url: string; finalUrl: string } | null>(null);
   const [canvas, setCanvas] = useState({ w: 0, h: 0 });
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -99,6 +125,38 @@ export function Stage() {
         set({ navigatedAway: url, frameReady: false, hover: null, selected: null, measureTarget: null, draft: null });
         el.src = proxySrc(url, useStore.getState().scripts);
       };
+      // The frame moved on its own (a submitted form, a redirect after a
+      // login): keep the banner honest. Landing back on the reviewed page —
+      // the usual end of a login — brings the comments back.
+      f.onDocument = (url, finalUrl) => {
+        landed.current = { url, finalUrl };
+        const st = useStore.getState();
+        const home = st.review?.url;
+        if (!home) return;
+        // a new document is starting: whatever pointed into the old one is stale until it has loaded
+        if (st.frameReady) st.set({ frameReady: false, hover: null, selected: null, measureTarget: null });
+        if (samePage(url, home) || samePage(finalUrl, home)) {
+          if (st.navigatedAway) st.set({ navigatedAway: null });
+          return;
+        }
+        if (st.navigatedAway && (samePage(st.navigatedAway, url) || samePage(st.navigatedAway, finalUrl))) return;
+        st.set({ navigatedAway: finalUrl || url, draft: null });
+      };
+      // A browser without the Navigation API let the page leave for its real
+      // origin after signing in; bring the review back (once — if the page
+      // keeps leaving, a reload loop would help nobody).
+      let escapedAt = 0;
+      f.onEscaped = () => {
+        const st = useStore.getState();
+        if (!st.review || Date.now() - escapedAt < 10_000) {
+          st.set({ frameReady: false, frameError: "The page left Redline and could not be brought back." });
+          return;
+        }
+        escapedAt = Date.now();
+        st.set({ navigatedAway: null, frameReady: false, frameError: null, hover: null, selected: null, measureTarget: null, draft: null });
+        st.toast("The page left Redline after signing in — reloaded it here.");
+        el.src = proxySrc(st.review.url, st.scripts);
+      };
       f.onCrashed = (reason) => {
         const st = useStore.getState();
         if (!st.scripts) return; // already static — nothing more to do
@@ -127,17 +185,34 @@ export function Stage() {
   // ask the server for a preview (rendered off the reviewer's tab) when missing or stale
   useEffect(() => {
     if (!review) return;
+    // a recent `thumbnail_at` without a URL is a capture the server skipped (sign-in form) — not yet
     const fresh = review.thumbnail_at && Date.now() - new Date(review.thumbnail_at).getTime() < STALE_MS;
-    if (review.thumbnail_url && fresh) return;
+    if (fresh) return;
     captureThumbnail(review.id).catch(() => {});
     // only once per page load
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [review?.id]);
 
-  // set page title into the review after load
+  // The site answered the reviewed page with its sign-in form instead (a
+  // redirect to /login): say so, or the first click on the password field
+  // drops a comment pin. A review *of* a login page is not that.
+  useEffect(() => {
+    if (!frameReady || !review) return;
+    const doc = frame().doc;
+    const l = landed.current;
+    // the reviewed page was asked for and a login form on another path came back
+    const isLogin = Boolean(l && !navigatedAway && samePage(l.url, review.url) && !samePage(l.finalUrl, review.url) && doc?.querySelector('input[type="password"]'));
+    if (isLogin !== useStore.getState().loginPage) set({ loginPage: isLogin });
+  }, [frameReady, review, navigatedAway, set]);
+
+  // set page title into the review after load — unless what loaded is the
+  // site's login form standing in for the page (a review of /account must
+  // not be called "Sign in" forever)
   useEffect(() => {
     if (!frameReady || !review || navigatedAway) return;
-    const t = frame().doc?.title?.trim();
+    const doc = frame().doc;
+    const t = doc?.title?.trim();
+    if (doc?.querySelector('input[type="password"]')) return;
     if (t && t !== review.title && (review.title === hostOf(review.url) || review.mode === "upload")) {
       api.patchReview(review.id, { title: t }).then(({ review: r }) => set({ review: r })).catch(() => {});
     }
@@ -276,8 +351,21 @@ export function Stage() {
       </div>
 
       {/* banners (stacked so they never overlap) */}
-      {(navigatedAway || frameError || hoverLocked) && (
+      {(navigatedAway || frameError || hoverLocked || loginPage) && (
         <div className="fixed left-1/2 top-16 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
+          {loginPage && frameReady && (
+            <div className="flex w-[calc(100vw-32px)] items-center gap-3 rounded-lg glass px-3 py-2 text-[12.5px] text-ink shadow-pop hairline toast-in sm:w-auto" role="status">
+              <KeyRound size={13} className="shrink-0 text-ink-2" />
+              <span className="max-w-[min(460px,calc(100vw-48px))]">
+                The site sent you to its sign-in page. Switch to Browse (<span className="kbd !py-0.5">V</span>) and sign in — Redline keeps the login for your account.
+              </span>
+              {mode !== "browse" && (
+                <Button size="sm" onClick={() => useStore.getState().setMode("browse")}>
+                  Browse
+                </Button>
+              )}
+            </div>
+          )}
           {hoverLocked && (
             <div className="flex items-center gap-2 rounded-full glass-dark px-3 py-1.5 text-[12.5px] text-white shadow-pop toast-in">
               <MousePointerClick size={13} className="text-red" />
@@ -290,7 +378,7 @@ export function Stage() {
           {navigatedAway && (
             <div className="flex items-center gap-2 rounded-lg glass-dark px-3 py-2 text-[12.5px] text-white shadow-pop toast-in">
               <span className="max-w-[320px] truncate">
-                You&apos;ve left the reviewed page — now on <span className="mono">{hostOf(navigatedAway)}</span>. Comments are hidden.
+                You&apos;ve left the reviewed page — now on <span className="mono">{placeOf(navigatedAway)}</span>. Comments are hidden.
               </span>
               <Button size="sm" variant="ghost" className="!text-white hover:!bg-white/10" onClick={() => window.dispatchEvent(new CustomEvent("redline:reload"))}>
                 <ArrowLeft size={13} /> Back
