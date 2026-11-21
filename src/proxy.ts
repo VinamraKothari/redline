@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { PROXY_TARGET_HEADER, SITE_COOKIE } from "@/lib/proxy/site-cookie";
+import { isOwnPage, isOwnPath, isProxyMachinery, isSharedPath } from "@/lib/proxy/own-paths";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase-config";
 
 /**
@@ -17,33 +18,35 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase-config";
  *    chunk bookkeeping intact and makes script errors readable. Which site?
  *    The Referer of such a request is the proxy URL of the document, which
  *    names the site; nested ES module imports fall back to the cookie the
- *    proxy sets on every reviewed page.
+ *    proxy sets on every reviewed page. Which paths are Redline's own is
+ *    decided in one place, src/lib/proxy/own-paths.ts, shared with the bridge.
  */
 
-/** Redline's own pages: the app, the account, and the marketing site around them (see src/app/(marketing)) */
-const PAGE = /^\/(?:$|p\/|r\/|start$|login$|pricing$|how-it-works$|changelog$|privacy$|terms$|imprint$|account(?:\/|$)|robots\.txt$|sitemap\.xml$)/;
 /** pages a signed-out visitor may see (the landing page decides what to render) */
-const PUBLIC_PAGE = /^\/(?:$|login$|pricing$|how-it-works$|changelog$|privacy$|terms$|imprint$|robots\.txt$|sitemap\.xml$)/;
-const OWN_PREFIXES = [
-  "/api/",
-  "/auth/",
-  "/r/",
-  "/p/",
-  "/account/",
-  "/start",
-  "/login",
-  "/bridge.js",
-  "/favicon.ico",
-];
+const PUBLIC_PAGE = /^\/(?:(?:login|pricing|how-it-works|changelog|privacy|terms|imprint)\/?|robots\.txt|sitemap\.xml)?$/;
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  if (PAGE.test(pathname)) return gate(req);
-  if (OWN_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
-
-  const site = siteFor(req);
-  if (!site) return NextResponse.next();
+  let site: string | null;
+  if (isOwnPath(pathname)) {
+    // A reviewed page may keep assets at a path that is also ours (an image
+    // from /api/og, a page's own /pricing). Requested by a proxied document
+    // they are the site's; Redline's own pages never have that Referer.
+    site = isSubresource(req) && !isProxyMachinery(pathname) ? proxiedDocumentSite(req) : null;
+    if (!site) return isOwnPage(pathname) ? gate(req) : NextResponse.next();
+  } else {
+    site = siteFor(req);
+    if (!site) {
+      const res = NextResponse.next();
+      // A page visit to a path Redline has no page for (/account/typo) gets
+      // Redline's 404. Its /_next requests must not look like a reviewed
+      // page's: with only the origin as Referer they come from "/", one of
+      // Redline's own pages, and stay Redline's.
+      if (req.headers.get("sec-fetch-dest") === "document") res.headers.set("Referrer-Policy", "origin");
+      return res;
+    }
+  }
 
   const target = new URL("/api/proxy", req.nextUrl.origin);
   target.searchParams.set("url", site + pathname + search);
@@ -98,30 +101,42 @@ function toLogin(req: NextRequest) {
 
 /* ── 2. asset routing ─────────────────────────────────────────────────────── */
 
-function siteFor(req: NextRequest): string | null {
+/** What a page at one of Redline's routes may fetch from the remembered site: things it shows, never code. */
+const FALLBACK_DEST = new Set(["image", "font", "style", "audio", "video", "track", "empty"]);
+
+/** Requests a document makes for what it shows (images, styles, scripts, fetches), as opposed to navigations. */
+function isSubresource(req: NextRequest): boolean {
+  const dest = req.headers.get("sec-fetch-dest");
+  // browsers without Fetch Metadata say nothing: treat it as unknown, not as an asset
+  return Boolean(dest) && !["document", "iframe", "frame", "embed", "object"].includes(dest!);
+}
+
+/** Same-origin Referer of this request, or null. */
+function sameOriginReferer(req: NextRequest): URL | null {
   const ref = req.headers.get("referer");
   if (!ref) return null;
-  let r: URL;
   try {
-    r = new URL(ref);
+    const r = new URL(ref);
+    return r.host === req.nextUrl.host || r.host === req.headers.get("host") ? r : null;
   } catch {
     return null;
   }
-  if (r.host !== req.nextUrl.host && r.host !== req.headers.get("host")) return null;
+}
 
-  // Requested by a proxied document: the referer names the site.
-  if (r.pathname.startsWith("/api/proxy")) {
-    const u = r.searchParams.get("url");
-    try {
-      return u ? new URL(u).origin : null;
-    } catch {
-      return null;
-    }
+/** The site a proxied document belongs to, when that document made this request. */
+function proxiedDocumentSite(req: NextRequest): string | null {
+  const r = sameOriginReferer(req);
+  if (!r || !r.pathname.startsWith("/api/proxy")) return null;
+  const u = r.searchParams.get("url");
+  try {
+    return u ? new URL(u).origin : null;
+  } catch {
+    return null;
   }
-  // Requested by one of Redline's own pages or stylesheets: ours.
-  if (PAGE.test(r.pathname) || r.pathname.startsWith("/_next/static/css/")) return null;
-  // Requested by a rewritten site asset (a module importing another): the
-  // reviewed site's origin was remembered in a cookie.
+}
+
+/** The reviewed site remembered by the proxy (see SITE_COOKIE). */
+function cookieSite(req: NextRequest): string | null {
   const c = req.cookies.get(SITE_COOKIE)?.value;
   if (!c) return null;
   try {
@@ -129,6 +144,36 @@ function siteFor(req: NextRequest): string | null {
   } catch {
     return null;
   }
+}
+
+/** Which reviewed site a request for a path Redline doesn't own outright is meant for, if any. */
+function siteFor(req: NextRequest): string | null {
+  const r = sameOriginReferer(req);
+  if (!r) return null;
+
+  // Requested by a proxied document: the referer names the site.
+  if (r.pathname.startsWith("/api/proxy")) return proxiedDocumentSite(req);
+  // Requested by one of Redline's stylesheets: ours (fonts and media under
+  // /_next/). Turbopack serves them from /_next/static/chunks/*.css. A
+  // reviewed site's stylesheets never get here: the proxy rewrites their
+  // url()s to proxy URLs.
+  if (r.pathname.startsWith("/_next/") && r.pathname.endsWith(".css")) return null;
+  if (isOwnPage(r.pathname)) {
+    // Redline's pages fetch their chunks, CSS and media from /_next/: ours.
+    // Anything else such a page asks for is not something Redline serves —
+    // it is a reviewed page that sits at exactly one of our routes (a site's
+    // own /pricing) and moved its address there itself (Next.js restores its
+    // canonical URL after hydration). Its images, fonts and stylesheets go to
+    // the site the proxy remembered; scripts never do, so nothing that runs
+    // on this origin is ever fetched on a Referer this weak.
+    if (isSharedPath(req.nextUrl.pathname) || !FALLBACK_DEST.has(req.headers.get("sec-fetch-dest") ?? "")) return null;
+    return cookieSite(req);
+  }
+  // Requested by a rewritten site asset (a module importing another): the
+  // reviewed site's origin was remembered in a cookie. A page visit never
+  // goes to a site on the strength of that cookie.
+  if (req.headers.get("sec-fetch-dest") === "document") return null;
+  return cookieSite(req);
 }
 
 export const config = {

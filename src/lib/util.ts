@@ -2,6 +2,8 @@ import { customAlphabet } from "nanoid";
 import { AUTHOR_COLORS } from "./types";
 
 const slugAlphabet = "23456789abcdefghjkmnpqrstuvwxyz";
+// Project, folder and review ids appear in Redline's own URLs (/p/<id>, /r/<id>):
+// src/lib/proxy/own-paths.ts recognises them by this alphabet — keep the two in step.
 export const newSlug = customAlphabet(slugAlphabet, 9);
 export const newId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 14);
 export const newKey = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 32);

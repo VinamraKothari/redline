@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-11-21",
+    title: "Select several pages, pins where you click, complete account pages",
+    tag: "improved",
+    items: [
+      "Comment pins now sit exactly where you click and drag smoothly: the marker is a circle centred on the spot you commented on, and a pin you drag stays under the pointer where you grabbed it instead of jumping up.",
+      "Pages whose addresses look like Redline's own (/account, /pricing, …) now load all their images and icons — a shop's account page no longer shows broken product images or missing icons.",
+      "Select several pages at once — drag a rectangle around them, Ctrl/Shift-click, or Ctrl+A — then move or delete them together; right-click any card for its actions.",
+    ],
+  },
+  {
     date: "2026-11-20",
     title: "Review pages behind a login",
     tag: "new",

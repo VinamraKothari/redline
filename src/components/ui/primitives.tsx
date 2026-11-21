@@ -189,6 +189,59 @@ export function MenuSeparator() {
 export function MenuLabel({ children }: { children: React.ReactNode }) {
   return <div className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-ink-3">{children}</div>;
 }
+/**
+ * A right-click menu: the same dropdown, opened at a point instead of under a
+ * button. There is no context-menu package here, so an invisible, zero-size
+ * trigger is parked at the pointer and the menu hangs off it. Non-modal, so a
+ * right-click elsewhere closes this one and can open the next straight away.
+ * The menu sits a few pixels below the pointer: on Linux and macOS the
+ * contextmenu event fires on button-down, and the release must not land on —
+ * and pick — the first item.
+ */
+export function ContextMenu({
+  at,
+  onClose,
+  label,
+  onCloseAutoFocus,
+  children,
+}: {
+  /** viewport point to open at; null = closed */
+  at: { x: number; y: number } | null;
+  onClose: () => void;
+  label: string;
+  onCloseAutoFocus?: (e: Event) => void;
+  children: React.ReactNode;
+}) {
+  // Radix hands focus back to the trigger on close, and this trigger can't take
+  // it; give it back to whatever had it when the menu opened (a tile's link after
+  // Shift+F10, say) — unless an item moved it somewhere on purpose, like a rename input.
+  const returnTo = React.useRef<HTMLElement | null>(null);
+  React.useLayoutEffect(() => {
+    if (at) returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [at]);
+  return (
+    <DropdownPrimitive.Root open={Boolean(at)} onOpenChange={(o) => !o && onClose()} modal={false}>
+      <DropdownPrimitive.Trigger asChild>
+        <span aria-hidden tabIndex={-1} className="pointer-events-none fixed h-0 w-0" style={{ left: at?.x ?? 0, top: at?.y ?? 0 }} />
+      </DropdownPrimitive.Trigger>
+      <MenuContent
+        aria-label={label}
+        side="bottom"
+        align="start"
+        sideOffset={3}
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e);
+          if (e.defaultPrevented) return;
+          e.preventDefault();
+          const active = document.activeElement;
+          if ((!active || active === document.body) && returnTo.current?.isConnected) returnTo.current.focus();
+        }}
+      >
+        {children}
+      </MenuContent>
+    </DropdownPrimitive.Root>
+  );
+}
 export const MenuCheckboxItem = DropdownPrimitive.CheckboxItem;
 export const MenuRadioGroup = DropdownPrimitive.RadioGroup;
 export const MenuRadioItem = DropdownPrimitive.RadioItem;

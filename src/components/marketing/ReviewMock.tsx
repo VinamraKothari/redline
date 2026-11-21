@@ -91,7 +91,7 @@ export function ReviewMock({ className }: { className?: string }) {
 
           {/* a developer comment from the Figma comparison, on the second headline line */}
           <span
-            className="absolute flex h-[22px] w-[22px] -translate-x-1/2 -translate-y-full items-center justify-center rounded-[11px_11px_11px_2px] bg-violet text-white shadow-pin"
+            className="absolute flex h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-violet text-white shadow-pin outline outline-2 outline-white"
             style={{ left: "39.5%", top: "24%" }}
           >
             <CodeXml size={12} strokeWidth={2.5} />
@@ -153,7 +153,7 @@ export function ReviewMock({ className }: { className?: string }) {
 function Pin({ n, left, top }: { n: number; left: string; top: string }) {
   return (
     <span
-      className="absolute flex h-[22px] w-[22px] -translate-x-1/2 -translate-y-full items-center justify-center rounded-[11px_11px_11px_2px] bg-red text-[11px] font-bold text-white shadow-pin"
+      className="absolute flex h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-red text-[11px] font-bold text-white shadow-pin outline outline-2 outline-white"
       style={{ left, top }}
     >
       {n}

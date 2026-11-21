@@ -10,6 +10,7 @@ import { frame } from "@/lib/frame/controller";
 import { api } from "@/lib/api";
 import type { Comment } from "@/lib/types";
 import { cn, initials } from "@/lib/util";
+import { pinBox, pinCentre } from "@/lib/pin";
 import { PageLayer } from "./PageLayer";
 import { Composer } from "@/components/comments/Composer";
 import { Thread, useParticipants } from "@/components/comments/Thread";
@@ -32,7 +33,7 @@ function Pin({
   unread,
   count,
   draft,
-  inverse,
+  draggable,
   onPointerDown,
   onClick,
 }: {
@@ -43,10 +44,11 @@ function Pin({
   unread?: boolean;
   count?: number;
   draft?: boolean;
-  inverse?: number; // 1/zoom, so pins stay the same size on screen
+  draggable?: boolean;
   onPointerDown?: (e: React.PointerEvent) => void;
   onClick?: (e: React.MouseEvent) => void;
 }) {
+  // fills the pinBox() it sits in: centred on the anchor, scaling around it
   return (
     <button
       type="button"
@@ -54,13 +56,15 @@ function Pin({
       onClick={onClick}
       data-pin={draft ? "draft" : label}
       className={cn(
-        "pointer-events-auto absolute flex h-8 w-8 origin-bottom-left -translate-y-full items-center justify-center rounded-[50%_50%_50%_0] text-[11px] font-bold text-white shadow-pin transition-transform",
+        "pointer-events-auto absolute inset-0 flex touch-none items-center justify-center rounded-full font-bold text-white shadow-pin transition-transform",
+        label.length > 2 ? "text-[9.5px] tracking-tight" : "text-[11px]",
         "outline outline-2 outline-white",
-        active ? "z-[3] scale-110" : "z-[2] hover:scale-110",
+        active ? "scale-110" : "hover:scale-110",
+        draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         draft && "pin-in",
         detached && "opacity-60 !outline-dashed",
       )}
-      style={{ background: color, transform: `scale(${(inverse || 1) * (active ? 1.12 : 1)}) translateY(-100%)` }}
+      style={{ background: color }}
       title={detached ? "This element is no longer on the page — pin shows its last position" : undefined}
     >
       {label}
@@ -131,6 +135,16 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
   }, [activeThread]);
 
   const inv = 1 / geom.zoom;
+  // the page's width in page pixels (wider than the viewport when it scrolls sideways)
+  const pageWidth = useMemo(() => {
+    void layoutTick;
+    return Math.max(viewport, frame().doc?.documentElement.scrollWidth ?? 0);
+  }, [viewport, layoutTick]);
+  /** The box for a pin anchored at (x, y), nudged inside the page at its edges. */
+  const boxAt = (x: number, y: number) => {
+    const c = pinCentre(x, y, inv, pageWidth);
+    return pinBox(c.x, c.y, inv);
+  };
 
   async function submitDraft(body: string, attachments: Comment["attachments"], title: string, viewports?: { min: number; max: number } | null) {
     if (!draft || !review) return;
@@ -159,10 +173,14 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
     }
   }
 
-  // pin dragging (move your own pins)
+  // Dragging moves your own pins (an admin moves anyone's; developer pins stay
+  // where the comparison put them). The pin keeps the spot you grabbed it by
+  // under the pointer: it moves by exactly what the pointer moves, never jumps
+  // so that its centre snaps to the pointer.
+  const canDrag = (c: Comment) => !viewOnly && !isDevComment(c) && (c.author_id === viewer.user_id || review?.role === "admin");
+
   function onPinDown(p: Placed, e: React.PointerEvent) {
-    if (viewOnly) return;
-    if (p.c.author_id !== viewer.user_id && review?.role !== "admin") return;
+    if (e.button !== 0 || !canDrag(p.c)) return;
     e.stopPropagation();
     // Capture so the drag keeps reporting to us even while the pointer is
     // over the page iframe (browse mode has no overlay above it).
@@ -171,31 +189,51 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
     } catch {
       /* ignore */
     }
-    dragging.current = { id: p.c.id, moved: false };
+    const session = { id: p.c.id, moved: false };
+    dragging.current = session;
     const startX = e.clientX;
     const startY = e.clientY;
+    // page coordinates (zoom and scroll accounted for by toPage)
+    const grab = geom.toPage(e.clientX, e.clientY);
+    // measured from where the pin is drawn, which is not the anchor for a pin nudged in from the page's edge
+    const drawn = pinCentre(p.x, p.y, inv, pageWidth);
+    const offset = { x: grab.x - drawn.x, y: grab.y - drawn.y };
+    const anchorAt = (ev: PointerEvent) => {
+      const at = geom.toPage(ev.clientX, ev.clientY);
+      return { x: at.x - offset.x, y: at.y - offset.y };
+    };
+    // a region comment's pin sits on the region's top-right corner; the region travels with it
+    const regionAt = (c: Comment | undefined, x: number, y: number) => (c?.anchor?.region ? { ...c.anchor.region, x: x - c.anchor.region.w, y } : null);
     const move = (ev: PointerEvent) => {
-      if (!dragging.current) return;
-      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 5) dragging.current.moved = true;
-      if (!dragging.current.moved) return;
-      const { x, y } = geom.toPage(ev.clientX, ev.clientY);
+      if (dragging.current !== session) return;
+      if (!session.moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) <= 5) return;
+      session.moved = true;
+      const { x, y } = anchorAt(ev);
       // optimistic: nudge the local anchor
-      const st = useStore.getState();
-      const c = st.comments.find((x) => x.id === p.c.id);
-      if (c?.anchor) upsert({ ...c, anchor: { ...c.anchor, selector: null, px: x, py: y, region: c.anchor.region ? { ...c.anchor.region, x: x - c.anchor.region.w, y } : null } });
+      const c = useStore.getState().comments.find((k) => k.id === p.c.id);
+      if (c?.anchor) upsert({ ...c, anchor: { ...c.anchor, selector: null, px: x, py: y, region: regionAt(c, x, y) } });
     };
     const up = async (ev: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const d = dragging.current;
-      dragging.current = null;
-      if (!d?.moved || !review) return;
-      const { x, y } = geom.toPage(ev.clientX, ev.clientY);
+      window.removeEventListener("pointercancel", up);
+      if (dragging.current !== session) return;
+      if (!session.moved || !review) {
+        dragging.current = null;
+        return;
+      }
+      // the click that follows this pointerup must not open the thread
+      setTimeout(() => {
+        if (dragging.current === session) dragging.current = null;
+      }, 0);
+      const { x, y } = anchorAt(ev);
       const c = useStore.getState().comments.find((k) => k.id === p.c.id);
-      const region = c?.anchor?.region ? { ...c.anchor.region, x: x - c.anchor.region.w, y } : null;
-      const anchor = frame().anchorFor(region ? region.x + region.w / 2 : x, region ? region.y + region.h / 2 : y, region);
+      const region = regionAt(c, x, y);
+      const anchor = { ...frame().anchorFor(region ? region.x + region.w / 2 : x, region ? region.y + region.h / 2 : y, region), px: x, py: y, region };
+      // drop it exactly where it was released, before the server answers
+      if (c?.anchor) upsert({ ...c, anchor: { ...c.anchor, ...anchor } });
       try {
-        const { comment } = await api.moveComment(p.c.id, { ...anchor, px: x, py: y, region });
+        const { comment } = await api.moveComment(p.c.id, anchor);
         upsert(comment);
       } catch (err) {
         toast((err as Error).message, "error");
@@ -203,6 +241,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   }
 
   return (
@@ -244,8 +283,9 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
             if (!o && st.activeThread === p.c.id) set({ activeThread: null });
           }}
         >
+          {/* the pin's box is a stacking context of its own (transform), so it carries the z-order */}
           <PopoverPrimitive.Anchor asChild>
-            <div className="absolute" style={{ left: p.x, top: p.y, width: 0, height: 0 }}>
+            <div className={cn("absolute", activeThread === p.c.id ? "z-[3]" : "z-[2]")} style={boxAt(p.x, p.y)}>
               <Pin
                 color={p.c.resolved ? "#1f9d55" : p.c.author_color}
                 label={p.c.resolved ? "✓" : isDevComment(p.c) ? "</>" : initials(p.c.author_name)}
@@ -253,7 +293,7 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
                 detached={p.detached}
                 unread={p.unread}
                 count={p.replies || undefined}
-                inverse={inv}
+                draggable={canDrag(p.c)}
                 onPointerDown={(e) => onPinDown(p, e)}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -288,8 +328,8 @@ export function CommentLayer({ geom }: { geom: StageGeom }) {
       {draft && !viewOnly && (
         <PopoverPrimitive.Root open onOpenChange={(o) => !o && !draft.dirty && set({ draft: null })}>
           <PopoverPrimitive.Anchor asChild>
-            <div className="absolute" style={{ left: draft.px, top: draft.py, width: 0, height: 0 }}>
-              <Pin color="var(--red)" label="+" draft inverse={inv} />
+            <div className="absolute z-[3]" style={boxAt(draft.px, draft.py)}>
+              <Pin color="var(--red)" label="+" draft />
             </div>
           </PopoverPrimitive.Anchor>
           <PopoverPrimitive.Portal>

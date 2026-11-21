@@ -24,12 +24,27 @@ build them:
   GET  /prevent-default-form
                        a form whose page handler calls preventDefault() and
                        never submits — the bridge must leave it alone
+  GET  /account/overview
+                       a page under a prefix Redline also uses (no login): an
+                       <img>, a CSS-masked icon and a stylesheet, both in the
+                       HTML and added by script with root-relative URLs, plus
+                       a /_next/static chunk in the HTML and one loaded later —
+                       the way a hydrated Next.js page has them
+  GET  /pricing        the images and icons, at exactly one of Redline's own
+                       routes; with ?self=1 the page moves its address onto
+                       /pricing with history.replaceState (what Next.js does
+                       when it restores its canonical URL)
+  GET  /account/style.css, /account/js-style.css, /images/pic.png,
+  GET  /images/ui/icon.svg, /_next/static/chunks/fixture-{main,lazy}.js
+                       the assets those pages use
 
 Usage: python3 server.py [port]   (default 3999)
 """
 import json
 import secrets
+import struct
 import sys
+import zlib
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -45,6 +60,50 @@ form{{display:grid;gap:12px;max-width:320px}}label{{display:grid;gap:4px;font-si
 input{{font:inherit;padding:8px 10px;border:1px solid #c9c5bb;border-radius:6px}}
 button{{font:inherit;padding:9px 14px;border:0;border-radius:6px;background:#1c1b18;color:#fff}}
 .err{{color:#c0392b;font-weight:600}}</style></head><body>{body}</body></html>"""
+
+
+def solid_png(w, h, rgb):
+    """A w×h PNG in one colour (stdlib only)."""
+    row = b"\x00" + bytes(rgb) * w
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(row * h)) + chunk(b"IEND", b"")
+
+
+PIC_PNG = solid_png(48, 32, (37, 99, 235))
+ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9"/></svg>'
+ACCOUNT_CSS = b"h1{color:rgb(5, 120, 85)}.css-bg{width:48px;height:32px;background:url(/images/pic.png)}"
+ACCOUNT_JS_CSS = b".js-bg{width:48px;height:32px;background:url(/images/pic.png)}"
+MASK = "center / contain no-repeat"
+
+
+def asset_page(heading, self_path=None, next_app=False):
+    """Product image, mask icon and stylesheet: once in the HTML, once added by script."""
+    move = f'history.replaceState(null, "", "{self_path}");' if self_path else ""
+    return (
+        '<link rel="stylesheet" href="/account/style.css">'
+        "<style>.icon{display:inline-block;width:20px;height:20px;background:#000}</style>"
+        f"<h1>{heading}</h1>"
+        '<p><img id="static-img" src="/images/pic.png" alt="Static product" width="48" height="32"> '
+        f'<span id="static-icon" class="icon" style="mask: url(\'/images/ui/icon.svg\') {MASK}"></span></p>'
+        '<div id="static-bg" class="css-bg"></div>'
+        '<div id="app"></div>'
+        + ('<script src="/_next/static/chunks/fixture-main.js"></script>' if next_app else "")
+        + "<script>"
+        f"{move}"
+        'const app = document.getElementById("app");'
+        'const img = document.createElement("img"); img.id = "js-img"; img.alt = "Sample diamond"; img.width = 48; img.height = 32; img.src = "/images/pic.png"; app.append(img);'
+        'const icon = document.createElement("span"); icon.id = "js-icon"; icon.className = "icon";'
+        f' icon.style.mask = \'url("/images/ui/icon.svg") {MASK}\'; app.append(icon);'
+        + (
+            # what a framework loads after start-up: a stylesheet under /account/… and a lazy chunk
+            'const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "/account/js-style.css"; document.head.append(link);'
+            'const bg = document.createElement("div"); bg.id = "js-bg"; bg.className = "js-bg"; app.append(bg);'
+            'const s = document.createElement("script"); s.src = "/_next/static/chunks/fixture-lazy.js"; document.head.append(s);'
+            if next_app
+            else ""
+        )
+        + "</script>"
+    )
 
 
 def login_form(action, error="", js=False, csrf=None):
@@ -93,6 +152,14 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for k, v in extra_headers:
             self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_bytes(self, data, content_type):
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 
@@ -154,6 +221,22 @@ class Handler(SimpleHTTPRequestHandler):
                 ' document.querySelector("[data-testid=result]").textContent = "handled by the page: " + new FormData(e.target).get("q"); });</script>'
             )
             return self.send_page(HTTPStatus.OK, body, "Search")
+        if path == "/account/overview":
+            return self.send_page(HTTPStatus.OK, asset_page("Account overview", next_app=True), "Account overview")
+        if path == "/pricing":
+            moves = parse_qs(urlsplit(self.path).query).get("self") == ["1"]
+            return self.send_page(HTTPStatus.OK, asset_page("Pricing", "/pricing" if moves else None), "Pricing")
+        if path in ("/_next/static/chunks/fixture-main.js", "/_next/static/chunks/fixture-lazy.js"):
+            key = "main" if path.endswith("main.js") else "lazy"
+            return self.send_bytes(f'document.documentElement.dataset.{key} = "1";'.encode(), "application/javascript")
+        if path == "/account/style.css":
+            return self.send_bytes(ACCOUNT_CSS, "text/css")
+        if path == "/account/js-style.css":
+            return self.send_bytes(ACCOUNT_JS_CSS, "text/css")
+        if path == "/images/pic.png":
+            return self.send_bytes(PIC_PNG, "image/png")
+        if path == "/images/ui/icon.svg":
+            return self.send_bytes(ICON_SVG, "image/svg+xml")
         if path == "/forbidden":
             # a bare refusal without a login form — the proxy shows its own explanation for these
             return self.send_page(HTTPStatus.FORBIDDEN, "<h1>Forbidden</h1>", "Forbidden")

@@ -4,8 +4,10 @@ import { useState, type DragEvent } from "react";
 
 /**
  * Native HTML5 drag and drop of page tiles into folders. A dragged tile puts
- * its review id under this custom type, so drop targets — and the project
- * page's "drop an .html file anywhere" handler — can tell a tile from a file.
+ * the ids of the pages it carries under this custom type — a JSON array, since
+ * dragging one tile of a selection takes the whole selection along — so drop
+ * targets, and the project page's "drop an .html file anywhere" handler, can
+ * tell a tile from a file.
  */
 export const REVIEW_DRAG_TYPE = "text/redline-review";
 
@@ -14,12 +16,31 @@ export function hasReviewDrag(dt: DataTransfer | null): boolean {
   return Boolean(dt && Array.from(dt.types).includes(REVIEW_DRAG_TYPE));
 }
 
+/** Puts the dragged pages on a drag. */
+export function setReviewDrag(dt: DataTransfer, ids: string[]) {
+  dt.setData(REVIEW_DRAG_TYPE, JSON.stringify(ids));
+  dt.effectAllowed = "move";
+}
+
+/** The pages on a drop. A bare id (what a single tile carried before multi-drag) still counts as one page. */
+export function readReviewDrag(dt: DataTransfer): string[] {
+  const raw = dt.getData(REVIEW_DRAG_TYPE);
+  if (!raw) return [];
+  if (!raw.startsWith("[")) return [raw];
+  try {
+    const ids: unknown = JSON.parse(raw);
+    return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Makes an element accept dropped page tiles: `over` is true while a tile
  * hovers it (for the highlight), `props` go on the element. Leaving for a
  * child element is not leaving, so the highlight doesn't flicker.
  */
-export function useReviewDropTarget(onDrop: (reviewId: string) => void, enabled = true) {
+export function useReviewDropTarget(onDrop: (reviewIds: string[]) => void, enabled = true) {
   const [over, setOver] = useState(false);
   const props = enabled
     ? {
@@ -39,8 +60,8 @@ export function useReviewDropTarget(onDrop: (reviewId: string) => void, enabled 
           e.preventDefault();
           e.stopPropagation();
           setOver(false);
-          const id = e.dataTransfer.getData(REVIEW_DRAG_TYPE);
-          if (id) onDrop(id);
+          const ids = readReviewDrag(e.dataTransfer);
+          if (ids.length) onDrop(ids);
         },
       }
     : {};

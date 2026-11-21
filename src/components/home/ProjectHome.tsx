@@ -1,22 +1,47 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, ChevronLeft, FileCode2, Folder as FolderIcon, FolderPlus, Monitor, Pencil, Smartphone, Tablet, Users } from "lucide-react";
+import { AppWindow, ArrowRight, ChevronLeft, CornerUpLeft, FileCode2, Folder as FolderIcon, FolderInput, FolderPlus, Monitor, Pencil, Smartphone, SquareDashedMousePointer, Tablet, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { FOLDER_NAME_MAX } from "@/lib/folders";
 import type { PublicReview } from "@/lib/review";
 import { VIEWPORTS, type Folder, type OpenThreadCount, type Project, type ProjectInvite, type ProjectMember, type Role } from "@/lib/types";
 import { cn, normalizeUrl } from "@/lib/util";
 import { Logo } from "@/components/Logo";
-import { Button, IconButton, Input, Tip, TooltipProvider } from "@/components/ui/primitives";
+import { Button, ContextMenu, IconButton, Input, MenuItem, MenuSeparator, Tip, TooltipProvider } from "@/components/ui/primitives";
 import { AccountMenu, useMe } from "./AccountMenu";
-import { hasReviewDrag, useReviewDropTarget } from "./dnd";
+import { hasReviewDrag, setReviewDrag, useReviewDropTarget } from "./dnd";
 import { FolderTile } from "./FolderTile";
 import { MembersDialog } from "./MembersDialog";
-import { PageTile } from "./PageTile";
+import { MoveToFolderDialog, MoveToProjectDialog, PageTile } from "./PageTile";
+import { BottomDock, DeletePagesDialog, DragStack, SelectionBar } from "./SelectionBar";
+import { bandSelect, clickSelect, forEachPage, intersects, pagesLabel, sameSet, type Box, type Modifiers, type Point } from "./selection";
 import { sumOpenThreads } from "./ThreadBadges";
+
+/** An open rubber band, kept in a ref: pointer moves and the auto-scroll loop update it without a render each. */
+interface Band {
+  pointerId: number;
+  /** where it started, in the scroll container's content coordinates (so it stays put while the page scrolls) */
+  x0: number;
+  y0: number;
+  /** the pointer now, in viewport coordinates */
+  clientX: number;
+  clientY: number;
+  /** the selection when the band started; Ctrl/Cmd toggles the hits within it */
+  base: ReadonlySet<string>;
+  toggle: boolean;
+  /** past the 4px that tell a drag from a click */
+  moved: boolean;
+  raf: number;
+}
+
+/** Pointer-downs here never start a rubber band (and right-clicks here keep the browser's menu). */
+const NOT_BACKGROUND = "a, button, input, textarea, select, label, [data-tile], [data-no-marquee], [role=dialog], [role=menu]";
+/** How close to the top or bottom edge a rubber band starts scrolling the page, and by how much per frame. */
+const EDGE = 32;
+const SCROLL_STEP = 12;
 
 interface Loaded {
   project: Project & { role: Role };
@@ -41,12 +66,25 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileDrag, setFileDrag] = useState(false);
-  const [pageDrag, setPageDrag] = useState(false);
+  // the pages being dragged right now (one card, or the whole selection)
+  const [dragIds, setDragIds] = useState<string[] | null>(null);
   const [members, setMembers] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const dragImage = useRef<HTMLDivElement>(null);
+  // Selected page ids — only ever pages in view: whatever leaves the view (moved, deleted) is pruned below.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  // the card a Shift-click measures its range from
+  const anchor = useRef<string | null>(null);
+  const bandRef = useRef<Band | null>(null);
+  const [band, setBand] = useState<Box | null>(null);
+  const [menu, setMenu] = useState<{ at: Point; kind: "selection" | "background" } | null>(null);
+  const [bulk, setBulk] = useState<"folder" | "project" | "delete" | null>(null);
+  // what went wrong in a bulk action, shown next to the selection bar
+  const [notice, setNotice] = useState<string | null>(null);
   // Every load and every local change bumps this; a load that started before
   // a later change is stale when it lands (it would snap a just-moved page back).
   const version = useRef(0);
@@ -88,6 +126,28 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
     const root = reviews.filter((r) => !r.folder_id);
     return { shown: folderId ? (perFolder[folderId] ?? []) : root, folderSizes: sizes, folderCounts: counts, rootSize: root.length };
   }, [data, folderId]);
+
+  // Prune the selection whenever the view changes, so a page that left it (moved
+  // to a folder, deleted) doesn't come back selected when it reappears later.
+  // Adjusted during render rather than in an effect, so no frame shows the stale state.
+  const [prunedFor, setPrunedFor] = useState(shown);
+  if (prunedFor !== shown) {
+    setPrunedFor(shown);
+    const inView = new Set(shown.map((r) => r.id));
+    if ([...selected].some((x) => !inView.has(x))) setSelected(new Set([...selected].filter((x) => inView.has(x))));
+  }
+
+  // the selection in visual order
+  const picked = useMemo(() => shown.filter((r) => selected.has(r.id)), [shown, selected]);
+  const sel = useMemo(() => new Set(picked.map((r) => r.id)), [picked]);
+  const deletable = picked.filter((r) => admin || r.created_by_id === me?.id);
+  const canMoveToFolder = (data?.folders.length ?? 0) > 0 || Boolean(folderId);
+  // The cards are memoised and get stable callbacks (a rubber band re-renders this
+  // page on every pointer move); those callbacks read the current view from here.
+  const view = useRef({ data, shown, sel, picked });
+  useLayoutEffect(() => {
+    view.current = { data, shown, sel, picked };
+  });
 
   async function start(e?: React.FormEvent) {
     e?.preventDefault();
@@ -158,22 +218,204 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
     }
   }
 
-  /** Put a page in a folder (null = root): optimistic, then the server's word; on failure the reload reverts it. */
-  async function movePage(reviewId: string, target: string | null) {
-    // the dragged tile may unmount right here (it leaves this view), so its dragend never bubbles up: end the drag state ourselves
-    setPageDrag(false);
-    const r = data?.reviews.find((x) => x.id === reviewId);
-    if (!r || (r.folder_id ?? null) === target) return;
-    setError(null);
-    version.current++;
-    setData((d) => (d ? { ...d, reviews: d.reviews.map((x) => (x.id === reviewId ? { ...x, folder_id: target } : x)) } : d));
-    try {
-      await api.moveToFolder(reviewId, target);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  /** Put pages in a folder (null = root): one optimistic update, then the server's word; on failure the reload reverts what didn't move. */
+  const movePages = useCallback(
+    async (reviewIds: string[], target: string | null) => {
+      // the dragged tiles may unmount right here (they leave this view), so their dragend never bubbles up: end the drag state ourselves
+      setDragIds(null);
+      const moving = reviewIds.filter((rid) => {
+        const r = view.current.data?.reviews.find((x) => x.id === rid);
+        return r && (r.folder_id ?? null) !== target;
+      });
+      if (!moving.length) return;
+      setNotice(null);
+      version.current++;
+      const ids = new Set(moving);
+      setData((d) => (d ? { ...d, reviews: d.reviews.map((x) => (ids.has(x.id) ? { ...x, folder_id: target } : x)) } : d));
+      setSelected(new Set());
+      const failed = await forEachPage(moving, (rid) => api.moveToFolder(rid, target), "move");
+      if (failed) setNotice(failed);
+      reload();
+    },
+    [reload],
+  );
+
+  /** Delete pages (already confirmed): gone from the grid at once, then the server's word. */
+  const deletePages = useCallback(
+    async (reviewIds: string[]) => {
+      setNotice(null);
+      version.current++;
+      const ids = new Set(reviewIds);
+      setData((d) => (d ? { ...d, reviews: d.reviews.filter((x) => !ids.has(x.id)) } : d));
+      setSelected(new Set());
+      const failed = await forEachPage(reviewIds, (rid) => api.deleteReview(rid), "delete");
+      if (failed) setNotice(failed);
+      reload();
+    },
+    [reload],
+  );
+
+  /** After a move through one of the dialogs: the pages have left the view. */
+  const afterBulkMove = useCallback(() => {
+    setSelected(new Set());
     reload();
+  }, [reload]);
+
+  function openInNewTabs(reviewIds: string[]) {
+    // browsers may hold back all but the first as pop-ups; the address bar then offers to allow them
+    for (const rid of reviewIds) window.open(`/r/${rid}`, "_blank", "noopener");
   }
+
+  /* ─── selection ───────────────────────────────────────────────────────── */
+
+  const pick = useCallback((reviewId: string, mods: Modifiers) => {
+    const { sel, shown } = view.current;
+    const next = clickSelect(sel, shown.map((r) => r.id), anchor.current, reviewId, mods);
+    anchor.current = next.anchor;
+    setSelected(next.selected);
+  }, []);
+
+  /** A right-click on a card: part of a selection of several → the selection's menu; otherwise the card alone is selected and shows its own. */
+  const tileMenu = useCallback((reviewId: string, at: Point): boolean => {
+    const { sel } = view.current;
+    if (sel.has(reviewId) && sel.size > 1) {
+      setMenu({ at, kind: "selection" });
+      return true;
+    }
+    anchor.current = reviewId;
+    setSelected(new Set([reviewId]));
+    return false;
+  }, []);
+
+  /** A card starts to move: it takes the selection along when it is part of one, else it goes alone (and becomes the selection). */
+  const tileDragStart = useCallback((e: DragEvent<HTMLElement>, reviewId: string) => {
+    const { sel, picked } = view.current;
+    const ids = sel.has(reviewId) && sel.size > 1 ? picked.map((r) => r.id) : [reviewId];
+    if (ids.length === 1) {
+      anchor.current = reviewId;
+      setSelected(new Set(ids));
+    }
+    setReviewDrag(e.dataTransfer, ids);
+    // a single card is its own drag image; several get the stack with the count
+    if (ids.length > 1 && dragImage.current) e.dataTransfer.setDragImage(dragImage.current, 40, 36);
+    setDragIds(ids);
+  }, []);
+
+  /** Is this pointer target empty background, where a rubber band (or the background's menu) may start? */
+  function isBackground(main: HTMLElement, target: EventTarget | null): boolean {
+    // events from portals (dialogs, menus) bubble through React to here, but aren't on the page
+    return target instanceof Element && main.contains(target) && !target.closest(NOT_BACKGROUND);
+  }
+
+  /** Viewport → the scroll container's content coordinates, clamped to the content. */
+  function toContent(main: HTMLElement, clientX: number, clientY: number) {
+    const r = main.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(clientX - r.left + main.scrollLeft, 0), main.clientWidth),
+      y: Math.min(Math.max(clientY - r.top + main.scrollTop, 0), main.scrollHeight),
+    };
+  }
+
+  function updateBand() {
+    const b = bandRef.current;
+    const main = mainRef.current;
+    if (!b || !main) return;
+    const p = toContent(main, b.clientX, b.clientY);
+    if (!b.moved && Math.hypot(p.x - b.x0, p.y - b.y0) < 4) return;
+    b.moved = true;
+    const box = { left: Math.min(b.x0, p.x), top: Math.min(b.y0, p.y), right: Math.max(b.x0, p.x), bottom: Math.max(b.y0, p.y) };
+    setBand(box);
+    const r = main.getBoundingClientRect();
+    const hits: string[] = [];
+    for (const el of main.querySelectorAll<HTMLElement>('[data-tile="page"]')) {
+      const t = el.getBoundingClientRect();
+      const dx = main.scrollLeft - r.left;
+      const dy = main.scrollTop - r.top;
+      if (intersects(box, { left: t.left + dx, top: t.top + dy, right: t.right + dx, bottom: t.bottom + dy }) && el.dataset.reviewId) hits.push(el.dataset.reviewId);
+    }
+    const next = bandSelect(b.base, hits, b.toggle);
+    setSelected((prev) => (sameSet(prev, next) ? prev : next));
+  }
+
+  /** While a band is open: scroll when the pointer is near (or past) the top or bottom edge, so a band can reach cards out of view. */
+  function autoScroll() {
+    const b = bandRef.current;
+    const main = mainRef.current;
+    if (!b || !main) return;
+    const r = main.getBoundingClientRect();
+    const step = b.clientY < r.top + EDGE ? -SCROLL_STEP : b.clientY > r.bottom - EDGE ? SCROLL_STEP : 0;
+    if (step && b.moved) {
+      const before = main.scrollTop;
+      main.scrollTop += step;
+      if (main.scrollTop !== before) updateBand();
+    }
+    b.raf = requestAnimationFrame(autoScroll);
+  }
+
+  const preventSelectStart = useCallback((e: Event) => e.preventDefault(), []);
+
+  function startBand(e: ReactPointerEvent<HTMLElement>) {
+    const main = e.currentTarget;
+    // primary button with a mouse or pen only: a finger on a phone scrolls the page instead
+    if (e.button !== 0 || e.pointerType === "touch" || !data || !isBackground(main, e.target)) return;
+    // the scroll bar of <main> is part of <main> too
+    if (e.clientX - main.getBoundingClientRect().left >= main.clientWidth) return;
+    // no text selection, no focus change: the band owns this press
+    e.preventDefault();
+    document.addEventListener("selectstart", preventSelectStart);
+    if (document.activeElement instanceof HTMLElement && main.contains(document.activeElement)) document.activeElement.blur();
+    main.setPointerCapture(e.pointerId);
+    const p = toContent(main, e.clientX, e.clientY);
+    bandRef.current = { pointerId: e.pointerId, x0: p.x, y0: p.y, clientX: e.clientX, clientY: e.clientY, base: sel, toggle: e.ctrlKey || e.metaKey, moved: false, raf: 0 };
+    bandRef.current.raf = requestAnimationFrame(autoScroll);
+  }
+
+  /** Ends the band: `click` when the button came up (a press that never moved clears the selection, as in Explorer); `revert` for Esc. */
+  function endBand(how: "click" | "cancel" | "revert") {
+    const b = bandRef.current;
+    if (!b) return;
+    bandRef.current = null;
+    cancelAnimationFrame(b.raf);
+    document.removeEventListener("selectstart", preventSelectStart);
+    const main = mainRef.current;
+    if (main?.hasPointerCapture(b.pointerId)) main.releasePointerCapture(b.pointerId);
+    setBand(null);
+    if (how === "revert") setSelected(b.base);
+    else if (how === "click" && !b.moved && !b.toggle) setSelected(new Set());
+  }
+
+  // Keyboard, Explorer style: Esc clears, Ctrl/Cmd+A selects every page in view, Delete asks to delete the selection.
+  // Not while typing, and not inside a dialog or menu, which handle their own keys. The listener is
+  // added once; it calls the handler of the latest render through this ref.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  useLayoutEffect(() => {
+    onKey.current = (e) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"], [role=dialog], [role=menu]')) return;
+      if (e.key === "Escape") {
+        if (bandRef.current) endBand("revert");
+        else if (sel.size) setSelected(new Set());
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "a") {
+        // never the browser's select-all of the page text here, even when there is no page to select
+        e.preventDefault();
+        if (shown.length) setSelected(new Set(shown.map((r) => r.id)));
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && sel.size && deletable.length) {
+        e.preventDefault();
+        setBulk("delete");
+      }
+    };
+  });
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  // a band never outlives the page
+  useEffect(() => () => document.removeEventListener("selectstart", preventSelectStart), [preventSelectStart]);
 
   async function removeProject() {
     if (!data) return;
@@ -188,13 +430,35 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
 
   const title = folder ? folder.name : data?.project.name;
   const canRename = folder ? canEdit : admin;
+  // New folder (editors, at the root), Select all (when there are pages), Back to project (in a folder)
+  const bgMenuHasItems = (canEdit && !folderId) || shown.length > 0 || Boolean(folderId);
 
   return (
     <TooltipProvider>
       <main
-        className="relative h-full overflow-y-auto overflow-x-hidden"
-        onDragStart={(e) => setPageDrag(hasReviewDrag(e.dataTransfer))}
-        onDragEnd={() => setPageDrag(false)}
+        ref={mainRef}
+        className={cn("relative h-full overflow-y-auto overflow-x-hidden", band && "select-none")}
+        onPointerDown={startBand}
+        onPointerMove={(e) => {
+          const b = bandRef.current;
+          if (!b || e.pointerId !== b.pointerId) return;
+          b.clientX = e.clientX;
+          b.clientY = e.clientY;
+          updateBand();
+        }}
+        onPointerUp={() => endBand("click")}
+        onPointerCancel={() => endBand("cancel")}
+        onLostPointerCapture={() => endBand("cancel")}
+        onContextMenu={(e) => {
+          // the background's own menu; cards stop their right-clicks before they get here
+          if (!data || !isBackground(e.currentTarget, e.target)) return;
+          // as in Explorer, a right-click on empty space lets go of the selection (Ctrl/Cmd keeps it)
+          if (!e.ctrlKey && !e.metaKey) setSelected(new Set());
+          if (!bgMenuHasItems) return;
+          e.preventDefault();
+          setMenu({ at: { x: e.clientX, y: e.clientY }, kind: "background" });
+        }}
+        onDragEnd={() => setDragIds(null)}
         onDragOver={(e) => {
           // a page tile on its way to a folder is not a file drop
           if (!canEdit || hasReviewDrag(e.dataTransfer)) return;
@@ -211,20 +475,29 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
         }}
       >
         <div className="pointer-events-none absolute inset-0 canvas-grid opacity-60" />
-        <div className="relative mx-auto flex min-h-full max-w-[880px] flex-col px-6 pb-10 pt-8">
-          <header className="flex items-center justify-between">
+        {band && (
+          <div
+            aria-hidden
+            data-testid="marquee"
+            className="pointer-events-none absolute z-[5] border border-blue bg-blue/10"
+            style={{ left: band.left, top: band.top, width: band.right - band.left, height: band.bottom - band.top }}
+          />
+        )}
+        {/* room under the last row for the selection bar */}
+        <div className={cn("relative mx-auto flex min-h-full max-w-[880px] flex-col px-6 pt-8", sel.size ? "pb-28" : "pb-10")}>
+          <header data-no-marquee className="flex items-center justify-between">
             <Logo />
             <AccountMenu />
           </header>
 
-          <nav aria-label="Breadcrumb" className="mt-10 flex min-w-0 items-center gap-1 text-[12.5px] text-ink-3">
+          <nav data-no-marquee aria-label="Breadcrumb" className="mt-10 flex min-w-0 items-center gap-1 text-[12.5px] text-ink-3">
             <Link href="/" className="inline-flex shrink-0 items-center gap-1 hover:text-ink">
               <ChevronLeft size={13} /> Projects
             </Link>
             {folderId && (
               <>
                 <span aria-hidden>/</span>
-                <ProjectCrumb id={id} name={data?.project.name ?? "…"} canDrop={canEdit} dragging={pageDrag} onDropPage={(rid) => movePage(rid, null)} />
+                <ProjectCrumb id={id} name={data?.project.name ?? "…"} canDrop={canEdit} dragging={dragIds?.length ?? 0} onDropPages={(ids) => movePages(ids, null)} />
                 <span aria-hidden>/</span>
                 <span className="truncate text-ink" aria-current="page">
                   {folder?.name ?? "…"}
@@ -233,7 +506,8 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
             )}
           </nav>
 
-          <section className="mt-2">
+          {/* the title, the add-page box and their text are for reading and typing, not for starting a rubber band */}
+          <section data-no-marquee className="mt-2">
             <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
               {/* title and pencil stay together; a long name wraps beside the pencil, aligned to its first line */}
               <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -427,7 +701,7 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
                       canEdit={canEdit}
                       onChanged={reload}
                       onError={setError}
-                      onDropPage={movePage}
+                      onDropPage={movePages}
                     />
                   ))}
                 {shown.map((r) => (
@@ -440,6 +714,12 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
                     rootSize={rootSize}
                     canEdit={canEdit}
                     canDelete={admin || r.created_by_id === me?.id}
+                    selected={sel.has(r.id)}
+                    dragging={Boolean(dragIds?.includes(r.id))}
+                    onPick={pick}
+                    onMenu={tileMenu}
+                    onDragStart={tileDragStart}
+                    onDelete={deletePages}
                     onChanged={reload}
                     onError={setError}
                   />
@@ -456,6 +736,77 @@ export function ProjectHome({ id, folderId }: { id: string; folderId?: string })
             </section>
           )}
         </div>
+
+        <BottomDock notice={notice} onDismiss={() => setNotice(null)}>
+          {sel.size > 0 && (
+            <SelectionBar
+              count={sel.size}
+              canMoveToFolder={canMoveToFolder}
+              canMove={canEdit}
+              canDelete={deletable.length > 0}
+              onMoveToFolder={() => setBulk("folder")}
+              onMoveToProject={() => setBulk("project")}
+              onDelete={() => setBulk("delete")}
+              onClear={() => setSelected(new Set())}
+            />
+          )}
+        </BottomDock>
+        {picked.length > 1 && <DragStack ref={dragImage} lead={picked[0]} count={picked.length} />}
+
+        <ContextMenu at={menu?.at ?? null} onClose={() => setMenu(null)} label={menu?.kind === "selection" ? `Actions for ${pagesLabel(sel.size)}` : folderId ? "Folder actions" : "Project actions"}>
+          {menu?.kind === "selection" ? (
+            <>
+              <MenuItem onSelect={() => openInNewTabs(picked.map((r) => r.id))}>
+                <AppWindow size={13} /> Open all in new tabs
+              </MenuItem>
+              {canEdit && canMoveToFolder && (
+                <MenuItem onSelect={() => setBulk("folder")}>
+                  <FolderIcon size={13} /> Move {pagesLabel(sel.size)} to folder…
+                </MenuItem>
+              )}
+              {canEdit && (
+                <MenuItem onSelect={() => setBulk("project")}>
+                  <FolderInput size={13} /> Move {pagesLabel(sel.size)} to project…
+                </MenuItem>
+              )}
+              {deletable.length > 0 && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem danger onSelect={() => setBulk("delete")}>
+                    <Trash2 size={13} /> Delete {pagesLabel(sel.size)}…
+                  </MenuItem>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {canEdit && !folderId && (
+                <MenuItem onSelect={() => setNewFolder("")}>
+                  <FolderPlus size={13} /> New folder
+                </MenuItem>
+              )}
+              {shown.length > 0 && (
+                <MenuItem onSelect={() => setSelected(new Set(shown.map((r) => r.id)))}>
+                  <SquareDashedMousePointer size={13} /> Select all
+                  <span className="ml-auto pl-4 text-[11px] text-ink-3">{isMac() ? "⌘A" : "Ctrl+A"}</span>
+                </MenuItem>
+              )}
+              {folderId && (
+                <MenuItem asChild>
+                  <Link href={`/p/${id}`}>
+                    <CornerUpLeft size={13} /> Back to project
+                  </Link>
+                </MenuItem>
+              )}
+            </>
+          )}
+        </ContextMenu>
+
+        {data && bulk === "folder" && (
+          <MoveToFolderDialog reviews={picked} folders={data.folders} folderSizes={folderSizes} rootSize={rootSize} onClose={() => setBulk(null)} onMoved={afterBulkMove} onError={setNotice} />
+        )}
+        {bulk === "project" && <MoveToProjectDialog reviews={picked} onClose={() => setBulk(null)} onMoved={afterBulkMove} onError={setNotice} />}
+        {bulk === "delete" && <DeletePagesDialog selected={picked.length} deletable={deletable} onClose={() => setBulk(null)} onDelete={deletePages} />}
 
         {data && me && (
           <MembersDialog
@@ -484,22 +835,27 @@ function sectionHeading(data: Loaded | null, inFolder: number | null, short = fa
   return `${prefix("Pages in this project")}${n(data.reviews.length, "page")} · ${n(data.folders.length, "folder")}`;
 }
 
+/** For the shortcut hint in a menu. */
+function isMac(): boolean {
+  return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+}
+
 /**
- * The project's name in the breadcrumb of a folder page. While a page tile is
- * being dragged it doubles as the way back to the root: drop it here.
+ * The project's name in the breadcrumb of a folder page. While page tiles are
+ * being dragged it doubles as the way back to the root: drop them here.
  */
-function ProjectCrumb({ id, name, canDrop, dragging, onDropPage }: { id: string; name: string; canDrop: boolean; dragging: boolean; onDropPage: (reviewId: string) => void }) {
-  const { over, props } = useReviewDropTarget(onDropPage, canDrop);
+function ProjectCrumb({ id, name, canDrop, dragging, onDropPages }: { id: string; name: string; canDrop: boolean; dragging: number; onDropPages: (reviewIds: string[]) => void }) {
+  const { over, props } = useReviewDropTarget(onDropPages, canDrop);
   return (
     <Link
       href={`/p/${id}`}
       {...props}
       data-testid="project-crumb"
       data-drop-over={over || undefined}
-      title={dragging ? "Drop here to move the page back to the project" : undefined}
+      title={dragging ? `Drop here to move ${dragging === 1 ? "the page" : `the ${dragging} pages`} back to the project` : undefined}
       className={cn(
         "min-w-0 truncate rounded-md px-1.5 py-0.5 transition-[box-shadow,background-color,color] hover:text-ink",
-        dragging && "bg-blue-soft text-blue",
+        dragging > 0 && "bg-blue-soft text-blue",
         over && "shadow-[0_0_0_2px_var(--blue)]",
       )}
     >

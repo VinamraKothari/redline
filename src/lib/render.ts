@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { launchBrowser, NAV_TIMEOUT } from "./screenshot";
+import { PIN_SIZE, pinCentre } from "./pin";
 
 /**
  * Full-page renders of a review snapshot with the markup drawn on top.
@@ -63,19 +64,26 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Numbered markers (and dashed region boxes) as an SVG the size of the page. */
+/**
+ * Numbered markers (and dashed region boxes) as an SVG the size of the page.
+ * Drawn like the workspace pins: a circle centred on the anchor with a 2px
+ * white ring (an SVG stroke straddles the edge, hence the radius + 1).
+ */
 export function pinsSvg(pins: RenderPin[], width: number, height: number): string {
+  const r = PIN_SIZE / 2 + 1;
   const parts: string[] = [];
   for (const p of pins) {
-    const x = Math.max(16, Math.min(width - 16, p.x));
-    const y = Math.max(16, Math.min(height - 16, p.y));
+    // same edge handling as the workspace (1:1 here), and kept off the bottom edge of the image too
+    const c = pinCentre(p.x, p.y, 1, width);
+    const x = c.x;
+    const y = Math.min(height - (r + 1), c.y);
     if (p.region) {
       parts.push(
         `<rect x="${p.region.x}" y="${p.region.y}" width="${p.region.w}" height="${p.region.h}" fill="${esc(p.color)}" fill-opacity="0.08" stroke="${esc(p.color)}" stroke-width="2" stroke-dasharray="6 4" rx="3"/>`,
       );
     }
     parts.push(
-      `<g><circle cx="${x}" cy="${y}" r="15" fill="${esc(p.color)}" stroke="#fff" stroke-width="2.5"/>` +
+      `<g><circle cx="${x}" cy="${y}" r="${r}" fill="${esc(p.color)}" stroke="#fff" stroke-width="2"/>` +
         `<text x="${x}" y="${y + 4.5}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#fff">${p.n}</text></g>`,
     );
   }

@@ -5,6 +5,8 @@
  *
  * Built to /public/bridge.js by `npm run build:bridge` (esbuild, IIFE).
  */
+import { isOwnPath, isProxyMachinery } from "../lib/proxy/own-paths";
+
 (() => {
   const w = window as Window & { __redline?: unknown };
   if (w.__redline) return;
@@ -40,12 +42,15 @@
   // (Next.js builds its router state from it; breadcrumbs print it), and
   // "/api/proxy?url=…" would leak into the page and cause hydration
   // mismatches. Same origin, so replaceState is allowed; src/proxy.ts routes
-  // any request for that path back to the site. Paths that Redline itself
-  // owns are left alone.
+  // any request for that path back to the site. Only an address that is
+  // exactly one of Redline's routes (a site's own /pricing or /account) is
+  // left alone: as the document's address it would become the Referer of
+  // every image the page's scripts add, and the middleware would take those
+  // for requests from Redline's own page. A shop's /account/overview is not
+  // one of them and is shown as is (see src/lib/proxy/own-paths.ts).
   try {
     const site = new URL(finalUrl);
-    const own = /^\/(?:$|p\/|r\/|start$|login$|api\/|auth\/|bridge\.js$|favicon\.ico$|_next\/static\/css\/)/;
-    if (location.pathname.startsWith("/api/proxy") && !own.test(site.pathname)) {
+    if (location.pathname.startsWith("/api/proxy") && !isOwnPath(site.pathname)) {
       history.replaceState(history.state, "", site.pathname + site.search + site.hash);
     }
   } catch {
@@ -62,7 +67,7 @@
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
     if (u.origin === appOrigin) {
       // our own endpoints stay ours; anything else was meant for the site
-      if (u.pathname.startsWith("/api/proxy") || u.pathname === "/bridge.js") return null;
+      if (isProxyMachinery(u.pathname)) return null;
       return siteOrigin ? siteOrigin + u.pathname + u.search : null;
     }
     return u.toString();

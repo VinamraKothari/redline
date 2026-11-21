@@ -3,19 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Folder as FolderIcon, FolderOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { Button, Dialog, DialogContent, IconButton, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
+import { Button, ContextMenu, Dialog, DialogContent, IconButton, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { FOLDER_NAME_MAX } from "@/lib/folders";
 import type { PublicReview } from "@/lib/review";
 import type { Folder, OpenThreadCount } from "@/lib/types";
 import { cn, timeAgo } from "@/lib/util";
 import { useReviewDropTarget } from "./dnd";
+import { isMenuKey, pointUnder, type Point } from "./selection";
 import { ThreadBadges } from "./ThreadBadges";
 
 /**
  * A folder of a project, shown among the page tiles: a mosaic of the previews
  * of the pages inside, the summed unresolved-comment badges, and — for people
- * who may change it — rename and delete. Page tiles can be dropped on it.
+ * who may change it — rename and delete, from the ⋯ menu or a right-click.
+ * Page tiles (one, or a whole selection) can be dropped on it.
  */
 export function FolderTile({
   folder,
@@ -33,7 +35,7 @@ export function FolderTile({
   canEdit: boolean;
   onChanged: () => void;
   onError: (msg: string) => void;
-  onDropPage: (reviewId: string, folderId: string) => void;
+  onDropPage: (reviewIds: string[], folderId: string) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   // The menu keeps its focus trap until its exit animation ends and then hands
@@ -51,7 +53,8 @@ export function FolderTile({
   }, [renaming]);
   const [name, setName] = useState(folder.name);
   const [deleting, setDeleting] = useState(false);
-  const { over, props: dropProps } = useReviewDropTarget((reviewId) => onDropPage(reviewId, folder.id), canEdit);
+  const [menuAt, setMenuAt] = useState<Point | null>(null);
+  const { over, props: dropProps } = useReviewDropTarget((reviewIds) => onDropPage(reviewIds, folder.id), canEdit);
   const href = `/p/${folder.project_id}/f/${folder.id}`;
   const thumbs = pages.map((p) => p.thumbnail_url).filter((u): u is string => Boolean(u));
   // "updated" means the folder or anything in it — the folder row itself only changes on rename
@@ -70,13 +73,64 @@ export function FolderTile({
     }
   }
 
+  // shared by the ⋯ menu and the right-click menu; a viewer's right-click offers only Open
+  const items = (
+    <>
+      <MenuItem asChild>
+        <Link href={href}>
+          <FolderOpen size={13} /> Open
+        </Link>
+      </MenuItem>
+      {canEdit && (
+        <>
+          <MenuItem
+            onSelect={() => {
+              setName(folder.name);
+              keepFocusForRename.current = true;
+              setRenaming(true);
+            }}
+          >
+            <Pencil size={13} /> Rename
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem danger onSelect={() => setDeleting(true)}>
+            <Trash2 size={13} /> Delete folder…
+          </MenuItem>
+        </>
+      )}
+    </>
+  );
+  const focusRenameOnClose = (e: Event) => {
+    if (!keepFocusForRename.current) return;
+    keepFocusForRename.current = false;
+    e.preventDefault();
+    renameInput.current?.focus();
+    renameInput.current?.select();
+  };
+
   return (
     <li
       {...dropProps}
       data-testid="folder-tile"
+      data-tile="folder"
       data-drop-over={over || undefined}
+      // React lets events from this card's dialog and menus (portals) bubble here; only the card itself counts
+      onContextMenu={(e) => {
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        if ((e.target as Element).closest("input")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setMenuAt(e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : pointUnder(e.target as Element));
+      }}
+      onKeyDown={(e) => {
+        // Shift+F10 inside this card's own dialog is not a request for the card's menu
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        if (!isMenuKey(e) || (e.target as Element).closest("input")) return;
+        e.preventDefault();
+        setMenuAt(pointUnder(e.target as Element));
+      }}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-xl bg-panel transition-shadow",
+        "group relative flex select-none flex-col overflow-hidden rounded-xl bg-panel transition-shadow",
         // the drop ring replaces the hairline (both are box-shadows) so it reads as one clear outline
         over ? "shadow-[0_0_0_2px_var(--blue)]" : "hairline hover:shadow-pop",
       )}
@@ -140,38 +194,15 @@ export function FolderTile({
                 <MoreHorizontal size={14} />
               </IconButton>
             </MenuTrigger>
-            <MenuContent
-              align="end"
-              onCloseAutoFocus={(e) => {
-                if (!keepFocusForRename.current) return;
-                keepFocusForRename.current = false;
-                e.preventDefault();
-                renameInput.current?.focus();
-                renameInput.current?.select();
-              }}
-            >
-              <MenuItem asChild>
-                <Link href={href}>
-                  <FolderOpen size={13} /> Open
-                </Link>
-              </MenuItem>
-              <MenuItem
-                onSelect={() => {
-                  setName(folder.name);
-                  keepFocusForRename.current = true;
-                  setRenaming(true);
-                }}
-              >
-                <Pencil size={13} /> Rename
-              </MenuItem>
-              <MenuSeparator />
-              <MenuItem danger onSelect={() => setDeleting(true)}>
-                <Trash2 size={13} /> Delete folder…
-              </MenuItem>
+            <MenuContent align="end" onCloseAutoFocus={focusRenameOnClose}>
+              {items}
             </MenuContent>
           </Menu>
         )}
       </div>
+      <ContextMenu at={menuAt} onClose={() => setMenuAt(null)} label={`Actions for folder ${folder.name}`} onCloseAutoFocus={focusRenameOnClose}>
+        {items}
+      </ContextMenu>
       {deleting && <DeleteFolderDialog folder={folder} pageCount={pages.length} onClose={() => setDeleting(false)} onDeleted={onChanged} onError={onError} />}
     </li>
   );
