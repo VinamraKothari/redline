@@ -1,4 +1,5 @@
-import type { Comment } from "./types";
+import type { Comment, TextEdit } from "./types";
+import { handoffText, STATUS_LABEL } from "./text-edits/format";
 import { KIND_LABEL, kindsInRange, viewportExportLabel, viewportRange } from "./viewports";
 import type { PublicReview } from "./review";
 
@@ -24,8 +25,14 @@ export function plain(text: string): string {
   return text.replace(/@\[([^\]]+)\]/g, "@$1");
 }
 
-function csvCell(v: string | number | null | undefined): string {
-  const s = v == null ? "" : String(v);
+/**
+ * One CSV cell. A cell starting with = + - @ (or a tab / carriage return)
+ * would be a formula to Excel and Sheets — titles, labels and names are typed
+ * by users — so it gets a leading apostrophe, which spreadsheets show as text.
+ */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -40,6 +47,11 @@ export function bundle(comments: Comment[]): ThreadBundle[] {
     root,
     replies: comments.filter((c) => c.parent_id === root.id).sort((a, b) => a.created_at.localeCompare(b.created_at)),
   }));
+}
+
+/** Where a copy edit opens in Redline: its page, with the Copy tab on that edit. */
+export function copyEditLink(origin: string, reviewId: string, edit: Pick<TextEdit, "id">): string {
+  return `${origin}/r/${reviewId}?copy=${edit.id}`;
 }
 
 /* ─── Jira CSV ───────────────────────────────────────────────────────────── */
@@ -96,9 +108,10 @@ export function threadOrder(comments: Comment[]): Comment[] {
  * One row per thread in the shape Jira Cloud's CSV importer maps directly:
  * Summary, Description, Issue Type, Priority, Status, Labels (×2), Reporter,
  * Created, Comment (×N, "date;author;body"), Attachment (×N), plus extra
- * columns you can map to custom fields or skip.
+ * columns you can map to custom fields or skip. Copy edits follow the
+ * threads, one row each, labelled `copy-change`.
  */
-export function toJiraCsv(review: PublicReview, comments: Comment[], origin: string, screenshots: Record<string, string> = {}): string {
+export function toJiraCsv(review: PublicReview, comments: Comment[], origin: string, screenshots: Record<string, string> = {}, textEdits: TextEdit[] = []): string {
   const threads = bundle(comments);
   const maxReplies = Math.max(0, ...threads.map((t) => t.replies.length));
   const attachmentsOf = ({ root, replies }: ThreadBundle) => {
@@ -169,12 +182,36 @@ export function toJiraCsv(review: PublicReview, comments: Comment[], origin: str
     ];
     return cells.map(csvCell).join(",");
   });
-  return "﻿" + [header.map(csvCell).join(","), ...rows].join("\r\n");
+  const copyRows = [...textEdits]
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((e) => {
+      const link = copyEditLink(origin, review.id, e);
+      const description = [handoffText(e, review.title, review.url, { format: "jira", status: STATUS_LABEL[e.status] }), `*Open in Redline:* ${link}`].join("\n");
+      const cells = [
+        `Copy change: ${e.label || "text block"}`.slice(0, 250),
+        description,
+        "Task",
+        "Medium",
+        e.status === "done" ? "Done" : "To Do",
+        "copy-change",
+        "",
+        e.author_name,
+        jiraDate(e.created_at),
+        ...Array.from({ length: maxReplies }, () => ""),
+        ...Array.from({ length: maxAttachments }, () => ""),
+        link,
+        e.label || e.selector,
+        "All viewports",
+        review.url,
+      ];
+      return cells.map(csvCell).join(",");
+    });
+  return "﻿" + [header.map(csvCell).join(","), ...rows, ...copyRows].join("\r\n");
 }
 
 /* ─── Markdown ───────────────────────────────────────────────────────────── */
 
-export function toMarkdown(review: PublicReview, comments: Comment[], origin: string): string {
+export function toMarkdown(review: PublicReview, comments: Comment[], origin: string, textEdits: TextEdit[] = []): string {
   const threads = bundle(comments);
   const pending = threads.filter((t) => !t.root.resolved);
   const resolved = threads.filter((t) => t.root.resolved);
@@ -210,5 +247,22 @@ export function toMarkdown(review: PublicReview, comments: Comment[], origin: st
     "",
     section("Pending", pending),
     section("Resolved", resolved),
+    copySection(review, textEdits, origin),
+  ].join("\n");
+}
+
+function copySection(review: PublicReview, edits: TextEdit[], origin: string): string {
+  if (!edits.length) return "";
+  const sorted = [...edits].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return [
+    `## Copy changes (${sorted.length})`,
+    "",
+    ...sorted.flatMap((e, i) => [
+      `### ${i + 1}. ${e.label || "Text block"}`,
+      "",
+      // every line of the block is a hard line break in Markdown
+      `${handoffText(e, review.title, review.url, { page: false, status: STATUS_LABEL[e.status] })}\nLink: ${copyEditLink(origin, review.id, e)}`.replace(/(?<! {2})\n/g, "  \n"),
+      "",
+    ]),
   ].join("\n");
 }

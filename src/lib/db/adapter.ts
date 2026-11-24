@@ -1,4 +1,4 @@
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, TextEdit, UserSettings } from "@/lib/types";
 
 /**
  * Storage adapter. Two implementations:
@@ -96,6 +96,23 @@ export interface DbAdapter {
   updateShape(id: string, patch: Partial<Shape>): Promise<Shape | null>;
   deleteShape(id: string): Promise<void>;
   deleteShapes(reviewId: string, viewport: number | null): Promise<void>;
+
+  /**
+   * Copy edits (migration 010), one per (review, selector), oldest first. On
+   * Supabase every read tolerates the missing table (no edits); writes fail
+   * with "Text edits are not set up yet — run migration 010 first."
+   */
+  listTextEdits(reviewId: string): Promise<TextEdit[]>;
+  getTextEdit(id: string): Promise<TextEdit | null>;
+  getTextEditBySelector(reviewId: string, selector: string): Promise<TextEdit | null>;
+  /** insert or replace by id; another row of the same (review, selector) is replaced too */
+  upsertTextEdit(e: TextEdit): Promise<TextEdit>;
+  updateTextEdit(id: string, patch: Partial<TextEdit>): Promise<TextEdit | null>;
+  deleteTextEdit(id: string): Promise<void>;
+  /** deletes every edit of the review and returns the deleted rows (for undo) */
+  deleteTextEdits(reviewId: string): Promise<TextEdit[]>;
+  /** puts previously deleted rows back as they were (ids, authors, times) */
+  insertTextEdits(rows: TextEdit[]): Promise<TextEdit[]>;
 
   /**
    * Site sessions (migration 009): the cookies a reviewed site set for one

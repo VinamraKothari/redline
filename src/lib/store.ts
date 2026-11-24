@@ -1,13 +1,26 @@
 "use client";
 
 import { create } from "zustand";
-import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, UserSettings, Viewer } from "./types";
+import type { Attachment, Comment, Profile, Shape, ShapeStyle, ShapeType, TextEdit, UserSettings, Viewer } from "./types";
 import type { PublicReview } from "./review";
 import type { ElementInfo, Rect } from "./frame/dom";
 import type { SiteSessionState } from "./site-session";
 
-export type Mode = "browse" | "comment" | "draw" | "inspect";
-export type Panel = "comments" | "inspect" | null;
+export type Mode = "browse" | "comment" | "draw" | "inspect" | "text";
+/**
+ * How copy edits show in the frame: not at all ("original"), applied exactly
+ * as the live site would show them ("edited"), or as track changes ("changes").
+ */
+export type TextView = "original" | "edited" | "changes";
+export type Panel = "comments" | "inspect" | "copy" | null;
+/**
+ * What the reviewer found for a copy edit in the frame: shown on the page
+ * ("applied"), already what the site says ("live"), the page changed under
+ * it ("outdated"), its block is gone or can't hold copy ("missing"), or the
+ * page keeps replacing the block's text and Redline stopped fighting it
+ * ("unstable").
+ */
+export type TextEditFound = "applied" | "live" | "outdated" | "missing" | "unstable";
 export type CommentFilter = "all" | "unread" | "mine" | "mentions" | "dev";
 export type CommentSort = "newest" | "oldest" | "unread";
 
@@ -41,6 +54,13 @@ interface State {
   viewOnly: boolean;
   comments: Comment[];
   shapes: Shape[];
+  /** copy edits of this page, oldest first */
+  textEdits: TextEdit[];
+  textView: TextView;
+  /** per edit id, what the last pass over the frame found (see lib/text-edits/apply) */
+  textEditStatus: Record<string, TextEditFound>;
+  /** a copy edit to point out on the page (Copy tab → Jump); `at` restarts the flash */
+  textFlash: { id: string; at: number } | null;
   /** the signed-in account (null until /api/me answered) */
   me: Profile | null;
   /** the account's preferences (see lib/settings); {} until they are loaded */
@@ -108,6 +128,10 @@ interface State {
   removeComment: (id: string) => void;
   upsertShape: (s: Shape) => void;
   removeShape: (id: string) => void;
+  setTextEdits: (edits: TextEdit[]) => void;
+  upsertTextEdit: (e: TextEdit) => void;
+  removeTextEdit: (id: string) => void;
+  setTextView: (v: TextView) => void;
   markRead: (threadId: string) => void;
   /** flag a thread to come back to — it shows as unread until opened again */
   markUnread: (threadId: string) => void;
@@ -116,6 +140,7 @@ interface State {
 }
 
 const READ_KEY = "redline:read:";
+const byCreated = (a: { created_at: string }, b: { created_at: string }) => a.created_at.localeCompare(b.created_at);
 
 /** Per-tab presence key; identity comes from the signed-in profile. */
 function initialViewer(): Viewer {
@@ -127,6 +152,10 @@ export const useStore = create<State>((set, get) => ({
   viewOnly: false,
   comments: [],
   shapes: [],
+  textEdits: [],
+  textView: "edited",
+  textEditStatus: {},
+  textFlash: null,
   me: null,
   settings: {},
   viewer: initialViewer(),
@@ -177,7 +206,7 @@ export const useStore = create<State>((set, get) => ({
   setMode: (m) =>
     set((s) => ({
       mode: m,
-      panel: m === "inspect" ? "inspect" : m === "comment" ? "comments" : s.panel === "inspect" ? "comments" : s.panel,
+      panel: m === "inspect" ? "inspect" : m === "comment" ? "comments" : m === "text" ? "copy" : s.panel === "inspect" ? "comments" : s.panel,
       hover: null,
       measureTarget: null,
       draft: m === "comment" ? s.draft : null,
@@ -207,6 +236,15 @@ export const useStore = create<State>((set, get) => ({
       return { shapes: next };
     }),
   removeShape: (id) => set((s) => ({ shapes: s.shapes.filter((x) => x.id !== id) })),
+  setTextEdits: (edits) => set({ textEdits: [...edits].sort(byCreated) }),
+  upsertTextEdit: (e) =>
+    set((s) => {
+      // one edit per block: a row for the same selector under another id (a concurrent first save) is replaced
+      const rest = s.textEdits.filter((x) => x.id !== e.id && !(x.review_id === e.review_id && x.selector === e.selector));
+      return { textEdits: [...rest, e].sort(byCreated) };
+    }),
+  removeTextEdit: (id) => set((s) => ({ textEdits: s.textEdits.filter((x) => x.id !== id) })),
+  setTextView: (textView) => set({ textView }),
   markRead: (threadId) => {
     const now = new Date().toISOString();
     set((s) => ({ readAt: { ...s.readAt, [threadId]: now } }));

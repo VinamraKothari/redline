@@ -1,11 +1,21 @@
 "use client";
 
-import type { Anchor, Attachment, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription } from "./types";
+import type { Anchor, Attachment, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Role, Shape, Subscription, TextEdit } from "./types";
 import type { PublicReview } from "./review";
 import type { Interval, PlanId } from "./billing/plans";
 import type { PlanSource } from "./billing/entitlements";
 import type { AdminStats, AdminUserDetail, AdminUserList, AuditView, PromoList } from "./admin/types";
 import type { NewPromo, Promo } from "./admin/stripe-promos";
+
+/** Body of a copy-edit save (`api.textEdits.put`). */
+export interface TextEditPut {
+  selector: string;
+  label: string;
+  before_html: string;
+  after_html: string;
+  viewport_width: number;
+  note?: string | null;
+}
 
 export type ProjectSummary = Project & { role: Role; review_count: number; preview_urls: string[] };
 
@@ -243,6 +253,36 @@ export const api = {
   clearShapes(reviewId: string, viewport: number | null) {
     const q = viewport ? `?viewport=${viewport}` : "?all=1";
     return call<{ ok: true }>(`/api/reviews/${reviewId}/shapes${q}`, { method: "DELETE" });
+  },
+
+  /* copy edits (see docs/text-edits.md) */
+  textEdits: {
+    list(reviewId: string) {
+      return call<{ edits: TextEdit[] }>(`/api/reviews/${reviewId}/text-edits`, { cache: "no-store" });
+    },
+    /** save one block's copy; `{ deleted }` when it equals the original again (a reset) */
+    put(reviewId: string, body: TextEditPut) {
+      return call<{ edit: TextEdit } | { deleted: string | null }>(`/api/reviews/${reviewId}/text-edits`, { method: "PUT", body: JSON.stringify(body) });
+    },
+    patch(reviewId: string, id: string, body: { status?: TextEdit["status"]; note?: string | null; after_html?: string }) {
+      return call<{ edit: TextEdit } | { deleted: string }>(`/api/reviews/${reviewId}/text-edits/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+    },
+    /** reset one block to its original; the deleted row comes back with an undo `token` (valid 24 h) */
+    remove(reviewId: string, id: string) {
+      return call<{ ok: true; edit: TextEdit; token: string }>(`/api/reviews/${reviewId}/text-edits/${id}`, { method: "DELETE" });
+    },
+    /** restore every block of the page; the deleted rows come back with one undo token each (`tokens[i]` for `edits[i]`) */
+    removeAll(reviewId: string) {
+      return call<{ ok: true; edits: TextEdit[]; tokens: string[] }>(`/api/reviews/${reviewId}/text-edits`, { method: "DELETE" });
+    },
+    /**
+     * Undo of remove/removeAll: hand back their tokens (at most 200) and the
+     * rows return as they were. Ids of rows whose block got a newer edit, or
+     * whose copy equals the original, come back in `skipped`.
+     */
+    restore(reviewId: string, tokens: string[]) {
+      return call<{ edits: TextEdit[]; skipped: string[] }>(`/api/reviews/${reviewId}/text-edits/restore`, { method: "POST", body: JSON.stringify({ tokens }) });
+    },
   },
 
   getReads(reviewId: string) {

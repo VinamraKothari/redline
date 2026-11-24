@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Reads bug threads from a Redline deployment's agent API (docs/agent-api.md).
+# Reads bug threads and copy edits from a Redline deployment's agent API (docs/agent-api.md).
 #
-#   bash scripts/bugs.sh                 open threads
+#   bash scripts/bugs.sh                 open threads and copy edits
 #   bash scripts/bugs.sh all|resolved    by status
-#   bash scripts/bugs.sh <thread id>     one thread
+#   bash scripts/bugs.sh <id>            one thread or copy edit
 #
 # Needs REDLINE_AGENT_URL and REDLINE_AGENT_TOKEN, from the environment or .env.local.
 set -euo pipefail

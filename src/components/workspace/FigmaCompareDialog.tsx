@@ -6,6 +6,7 @@ import { Button, Dialog, DialogContent, Input } from "@/components/ui/primitives
 import { api } from "@/lib/api";
 import { frame } from "@/lib/frame/controller";
 import { snapshotDocument, waitForImages } from "@/lib/figma/snapshot";
+import { withOriginal } from "@/lib/text-edits/sync";
 import { parseFigmaUrl } from "@/lib/figma/spec";
 import { isDevComment } from "@/lib/figma/dev";
 import { useStore } from "@/lib/store";
@@ -85,7 +86,8 @@ export function FigmaCompareDialog({ open, onOpenChange }: { open: boolean; onOp
         win.scrollTo(0, 0);
         await new Promise((r) => setTimeout(r, 250));
       }
-      const snapshot = snapshotDocument(doc);
+      // the page's own copy: copy edits are Redline's, not the implementation's
+      const snapshot = withOriginal(() => snapshotDocument(doc));
       if (win && scrolled) win.scrollTo(0, scrolled);
       setPhase(`Comparing ${snapshot.nodes.length} elements with Figma…`);
       const res = await api.figmaCompare(review.id, url.trim(), snapshot, viewport);

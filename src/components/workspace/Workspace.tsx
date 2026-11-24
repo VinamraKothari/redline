@@ -15,6 +15,7 @@ import { Toasts } from "./Toasts";
 import { useMe } from "@/components/home/AccountMenu";
 import { SettingsDialogHost } from "@/components/settings/SettingsDialog";
 import { useShortcuts } from "@/lib/hooks/useShortcuts";
+import { useTextEdits } from "@/lib/text-edits/useTextEdits";
 import { cn } from "@/lib/util";
 import { PanelRightOpen } from "lucide-react";
 import { IconButton, Tip } from "@/components/ui/primitives";
@@ -46,6 +47,11 @@ export function Workspace({
       mode: viewOnly ? "browse" : "comment",
       panel: "comments",
       activeThread: focusComment,
+      // copy edits belong to the page: the next one starts without them (useTextEdits loads its own)
+      textEdits: [],
+      textEditStatus: {},
+      textView: "edited",
+      textFlash: null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.id]);
@@ -75,6 +81,7 @@ export function Workspace({
 
   useShortcuts();
   useMe();
+  useTextEdits(initial.id);
 
   // keep presence in sync once the profile arrives (or changes)
   useEffect(() => {
@@ -98,7 +105,7 @@ export function Workspace({
           {!fullscreen && !panel && (
             <div className="absolute right-3 top-3 z-30">
               <Tip label="Show panel" side="left">
-                <IconButton className="bg-panel shadow-pop hairline" onClick={() => set({ panel: mode === "inspect" ? "inspect" : "comments" })}>
+                <IconButton className="bg-panel shadow-pop hairline" onClick={() => set({ panel: mode === "inspect" ? "inspect" : mode === "text" ? "copy" : "comments" })}>
                   <PanelRightOpen size={15} />
                 </IconButton>
               </Tip>

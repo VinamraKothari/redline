@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Acme — Next-like</title>
+<!-- a Next/Tailwind-style page for the copy-edit tests (Tailwind-ish utility classes, styled inline spans and links, a nav of links, an icon button, a form, a clock and a client re-render) -->
+<style>
+/* tailwind-ish utilities + next/font-ish families */
+*,:before,:after{box-sizing:border-box;margin:0}
+body{font-family:"Inter",system-ui,sans-serif;color:#0f172a;-webkit-font-smoothing:antialiased;background:#fff}
+.__font_display{font-family:"DejaVu Serif",serif}
+.mx-auto{margin-left:auto;margin-right:auto}.max-w-5xl{max-width:64rem}.px-6{padding-left:1.5rem;padding-right:1.5rem}.py-16{padding-top:4rem;padding-bottom:4rem}
+.flex{display:flex}.items-center{align-items:center}.gap-6{gap:1.5rem}.gap-2{gap:.5rem}.justify-between{justify-content:space-between}
+.text-5xl{font-size:3rem;line-height:1}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-xs{font-size:.75rem;line-height:1rem}
+.font-semibold{font-weight:600}.font-medium{font-weight:500}.font-bold{font-weight:700}
+.tracking-tight{letter-spacing:-.025em}.tracking-widest{letter-spacing:.1em}.uppercase{text-transform:uppercase}
+.text-slate-600{color:#475569}.text-indigo-600{color:#4f46e5}.text-sky-600{color:#0284c7}.text-white{color:#fff}.text-slate-300{color:#cbd5e1}
+.underline{text-decoration-line:underline}.decoration-2{text-decoration-thickness:2px}.underline-offset-4{text-underline-offset:4px}
+.bg-slate-900{background:#0f172a}.bg-indigo-600{background:#4f46e5}.rounded-full{border-radius:9999px}.px-5{padding-left:1.25rem;padding-right:1.25rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}
+.mt-4{margin-top:1rem}.mt-6{margin-top:1.5rem}.mt-8{margin-top:2rem}.list-disc{list-style:disc;padding-left:1.25rem}.leading-relaxed{line-height:1.625}
+.btn{border:0;cursor:pointer;font:inherit}.btn svg{width:16px;height:16px}
+.italic-serif{font-family:"DejaVu Serif",serif;font-style:italic;font-weight:400;letter-spacing:.02em}
+</style></head>
+<body>
+<header class="mx-auto max-w-5xl px-6 py-2 flex items-center justify-between">
+  <span class="font-bold">Acme</span>
+  <nav class="flex gap-6">
+    <a class="nav-link text-xs uppercase tracking-widest font-medium" href="/pricing" data-js-nav>Pricing</a>
+    <a class="nav-link text-xs uppercase tracking-widest font-medium" href="/docs" data-js-nav>Docs</a>
+    <a class="nav-link text-xs uppercase tracking-widest font-medium" href="https://example.com/blog">Blog</a>
+  </nav>
+</header>
+<main class="mx-auto max-w-5xl px-6 py-16">
+  <h1 id="hero" class="__font_display text-5xl font-semibold tracking-tight">Build products your customers love</h1>
+  <p id="sub" class="mt-6 text-lg text-slate-600 leading-relaxed">Ship faster with <span class="text-indigo-600 font-semibold">50% fewer bugs</span> and a <a class="text-sky-600 underline decoration-2 underline-offset-4" href="/guide">step-by-step guide</a> that works for <span class="italic-serif">every</span> team.</p>
+  <form id="signup" class="mt-8 flex gap-2" action="/submitted" method="post">
+    <input name="email" placeholder="you@company.com">
+    <button id="cta" class="btn bg-indigo-600 text-white rounded-full px-5 py-2 text-sm font-semibold flex items-center gap-2" type="submit"><span class="label">Get started free</span><svg viewBox="0 0 16 16"><path d="M2 8h12M9 3l5 5-5 5" stroke="currentColor" fill="none"/></svg></button>
+  </form>
+  <ul id="feat" class="mt-8 list-disc text-slate-600">
+    <li>Unlimited projects for small teams</li>
+    <li>Realtime collaboration with comments</li>
+    <li>Export to <strong>Jira</strong> and Linear</li>
+  </ul>
+  <p id="rerender" class="mt-4 text-sm">Rendered by the client</p>
+  <p id="clock" class="mt-4 text-xs text-slate-600">tick 0</p>
+</main>
+<section class="bg-slate-900 py-16"><div class="mx-auto max-w-5xl px-6">
+  <h2 id="dark-h" class="text-5xl font-semibold tracking-tight text-white">Trusted by 4,000 teams</h2>
+  <p id="dark-p" class="mt-4 text-lg text-slate-300">From startups to the enterprise, everyone reviews in one place.</p>
+</div></section>
+<section id="icons" class="mx-auto max-w-5xl px-6 py-16">
+  <button id="b1" class="btn flex items-center gap-2"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>Save changes</button>
+  <a id="l1" class="text-sky-600" href="/docs"><svg viewBox="0 0 16 16" width="16" height="16"><rect width="16" height="16"/></svg> Read the docs</a>
+  <p id="p1">Price <s>$20</s> now $10 <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">per month</p>
+  <div id="d1">Plain div text<div>nested block</div></div>
+</section>
+<script>
+window.__nav=0;window.__shortcut=0;window.__submits=0;window.__btn=0;window.__keys=[];window.__docClicks=0;
+document.addEventListener('click',e=>{window.__docClicks++;const a=e.target.closest('a[data-js-nav]');if(a){e.preventDefault();window.__nav++;history.pushState({},'',a.getAttribute('href'));}});
+document.addEventListener('keydown',e=>{window.__keys.push(e.key);if(e.key==='/'||(e.key==='k'&&(e.metaKey||e.ctrlKey))){window.__shortcut++;e.preventDefault();}});
+document.getElementById('signup').addEventListener('submit',e=>{e.preventDefault();window.__submits++;});
+document.getElementById('cta').addEventListener('click',()=>{window.__btn++;});
+// a framework re-rendering a block with the same text (hydration-style), and on demand
+setTimeout(()=>{const p=document.getElementById('rerender');p.textContent='Rendered by the client';},400);
+window.rerender=()=>{const p=document.getElementById('rerender');p.textContent='Rendered by the client';};
+window.fight=()=>{let n=0;const t=setInterval(()=>{document.getElementById('rerender').textContent='Rendered by the client';if(++n>60)clearInterval(t)},50)};
+let tick=0;setInterval(()=>{document.getElementById('clock').textContent='tick '+(++tick)},1000);
+</script>
+</body></html>

@@ -16,6 +16,7 @@ const auth = { authorization: `Bearer ${TOKEN}` };
 
 const now = "2026-11-01T10:00:00.000Z";
 const later = "2026-11-01T11:00:00.000Z";
+const latest = "2026-11-01T12:00:00.000Z";
 const PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 function review(id: string, project_id: string, folder_id: string | null = null) {
@@ -42,7 +43,7 @@ test.beforeAll(async () => {
   } catch {
     /* fresh run */
   }
-  for (const k of ["projects", "folders", "reviews", "comments"]) store[k] = store[k] || {};
+  for (const k of ["projects", "folders", "reviews", "comments", "textEdits"]) store[k] = store[k] || {};
   store.projects[PROJECT] = { id: PROJECT, name: "Redline bugs", created_by: "u1", created_at: now, updated_at: now };
   store.projects.otherproj = { id: "otherproj", name: "Someone else", created_by: "u2", created_at: now, updated_at: now };
   store.folders.agfolder1 = { id: "agfolder1", project_id: PROJECT, name: "Checkout", position: 0, created_by: "u1", created_at: now, updated_at: now };
@@ -63,6 +64,15 @@ test.beforeAll(async () => {
   store.comments.agreply01 = comment("agreply01", "agpage001", { parent_id: "agthread1", body: "Same on tablet", author_name: "Sam", created_at: later });
   store.comments.agthread2 = comment("agthread2", "agpage002", { body: "Fixed already", resolved: true, created_at: later });
   store.comments.agthread3 = comment("agthread3", "agother01", { body: "Not for the agent" });
+  const copyEdit = {
+    id: "agcopy001", review_id: "agpage002", selector: "main > h1", label: "the heading “Log in”",
+    before_html: "Log in to view your orders", before_text: "Log in to view your orders",
+    after_html: '<strong>Sign in</strong> to view <a href="/orders">your orders</a>', after_text: "Sign in to view your orders",
+    viewport_width: 1440, status: "open", note: "New tone of voice", author_id: "u1", author_name: "Priya", author_color: "#e2342b",
+    created_at: latest, updated_at: latest,
+  };
+  store.textEdits.agcopy001 = copyEdit;
+  store.textEdits.agcopy002 = { ...copyEdit, id: "agcopy002", review_id: "agother01" };
   await fs.mkdir(path.dirname(FILE), { recursive: true });
   await fs.writeFile(FILE, JSON.stringify(store, null, 1), "utf8");
 });
@@ -80,12 +90,14 @@ test("lists open threads of the configured project with full context", async ({ 
   expect(res.headers()["cache-control"]).toContain("no-store");
   const body = await res.json();
   expect(body.project).toEqual({ id: PROJECT, name: "Redline bugs" });
-  expect(body.count).toBe(1);
+  expect(body.count).toBe(2);
+  expect(body.threads.map((x: { id: string }) => x.id)).toEqual(["agthread1", "agcopy001"]);
   const t = body.threads[0];
   expect(t).toMatchObject({
     id: "agthread1",
     status: "open",
     kind: "comment",
+    copy: null,
     title: "Button overlaps price",
     body: "On phones the button covers the price, ask @Sam",
     page: { review_id: "agpage001", url: "https://example.test/agpage001", folder: "Checkout" },
@@ -105,11 +117,11 @@ test("lists open threads of the configured project with full context", async ({ 
 
 test("filters by status and page, and never leaves the project", async ({ request }) => {
   const all = await (await request.get("/api/agent/bugs?status=all", { headers: auth })).json();
-  expect(all.threads.map((t: { id: string }) => t.id)).toEqual(["agthread1", "agthread2"]);
+  expect(all.threads.map((t: { id: string }) => t.id)).toEqual(["agthread1", "agthread2", "agcopy001"]);
   const resolved = await (await request.get("/api/agent/bugs?status=resolved", { headers: auth })).json();
   expect(resolved.threads.map((t: { id: string }) => t.id)).toEqual(["agthread2"]);
   const page = await (await request.get("/api/agent/bugs?status=all&review=agpage002", { headers: auth })).json();
-  expect(page.count).toBe(1);
+  expect(page.count).toBe(2);
   expect((await request.get("/api/agent/bugs?review=agother01", { headers: auth })).status()).toBe(404);
   expect((await request.get("/api/agent/bugs?status=nope", { headers: auth })).status()).toBe(400);
 });
@@ -122,4 +134,40 @@ test("returns one thread by its id or a reply's id", async ({ request }) => {
   // threads in other projects look exactly like missing ones
   expect((await request.get("/api/agent/bugs/agthread3", { headers: auth })).status()).toBe(404);
   expect((await request.get("/api/agent/bugs/nosuchid", { headers: auth })).status()).toBe(404);
+});
+
+test("lists copy edits as kind \"copy\" with before and after in every form", async ({ request }) => {
+  const body = await (await request.get("/api/agent/bugs?review=agpage002", { headers: auth })).json();
+  expect(body.count).toBe(1);
+  const c = body.threads[0];
+  expect(c).toMatchObject({
+    id: "agcopy001",
+    kind: "copy",
+    status: "open",
+    title: "Copy change: the heading “Log in”",
+    author: "Priya",
+    page: { review_id: "agpage002", url: "https://example.test/agpage002" },
+    viewport: { written_at: 1440, applies_to: "All viewports", range: null },
+    element: { label: "the heading “Log in”", selector: "main > h1" },
+    position: null,
+    figma: null,
+    replies: [],
+    copy: {
+      label: "the heading “Log in”",
+      selector: "main > h1",
+      status: "open",
+      note: "New tone of voice",
+      before: { html: "Log in to view your orders", markdown: "Log in to view your orders", text: "Log in to view your orders" },
+      after: {
+        html: '<strong>Sign in</strong> to view <a href="/orders">your orders</a>',
+        markdown: "**Sign in** to view [your orders](/orders)",
+        text: "Sign in to view your orders",
+      },
+    },
+  });
+  expect(c.body).toContain("After: **Sign in** to view [your orders](/orders)");
+  expect(c.link).toMatch(/\/r\/agpage002\?copy=agcopy001$/);
+  // by id too; another project's edit is as missing as a made-up one
+  expect((await (await request.get("/api/agent/bugs/agcopy001", { headers: auth })).json()).thread.kind).toBe("copy");
+  expect((await request.get("/api/agent/bugs/agcopy002", { headers: auth })).status()).toBe(404);
 });

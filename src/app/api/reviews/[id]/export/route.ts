@@ -6,12 +6,12 @@ import { toJiraCsv, toMarkdown } from "@/lib/export";
 
 export const runtime = "nodejs";
 
-/** GET ?format=jira|md — downloadable export of all comments. */
+/** GET ?format=jira|md — downloadable export of all comments and copy edits. */
 export const GET = guarded(async (req: NextRequest, ctx: RouteContext<"/api/reviews/[id]/export">) => {
   const { id } = await ctx.params;
   const { user, review, role } = await reviewAccess(id);
   const d = await db();
-  const comments = await d.listComments(id);
+  const [comments, textEdits] = await Promise.all([d.listComments(id), d.listTextEdits(id)]);
   const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host;
   const proto = req.headers.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const origin = `${proto}://${host}`;
@@ -20,11 +20,11 @@ export const GET = guarded(async (req: NextRequest, ctx: RouteContext<"/api/revi
   const pub = publicReview(review, role, user.id);
 
   if (format === "md") {
-    return new Response(toMarkdown(pub, comments, origin), {
+    return new Response(toMarkdown(pub, comments, origin, textEdits), {
       headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="${safe}-feedback.md"` },
     });
   }
-  return new Response(toJiraCsv(pub, comments, origin), {
+  return new Response(toJiraCsv(pub, comments, origin, {}, textEdits), {
     headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${safe}-jira.csv"` },
   });
 });

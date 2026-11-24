@@ -200,6 +200,7 @@ function Tile({
 
 export function CommentsPanel() {
   const comments = useStore((s) => s.comments);
+  const textEditCount = useStore((s) => s.textEdits.length);
   const viewer = useStore((s) => s.viewer);
   const review = useStore((s) => s.review);
   const activeThread = useStore((s) => s.activeThread);
@@ -390,9 +391,10 @@ export function CommentsPanel() {
           <Tip label="Download Jira CSV" side="bottom">
             <IconButton
               size="sm"
-              disabled={!threads.length}
+              disabled={!threads.length && !textEditCount}
               onClick={() => {
-                const csv = toJiraCsv(review, comments, location.origin);
+                // copy changes ride along as their own rows
+                const csv = toJiraCsv(review, comments, location.origin, {}, useStore.getState().textEdits);
                 const a = document.createElement("a");
                 a.href = URL.createObjectURL(
                   new Blob([csv], { type: "text/csv;charset=utf-8" }),

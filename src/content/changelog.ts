@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-11-24",
+    title: "Change the copy of any page",
+    tag: "new",
+    items: [
+      "Change the copy of any page right in Redline: press T, click any text and type — like a text layer in Figma. The new words keep the page's exact font, size and spacing; bold, italic, underline and links are a shortcut away, and ⌘Z works while you type and after you've saved. Nothing changes on the live site.",
+      "Switch between Original, Edited and Changes at the top: Edited shows the page exactly as it would read with the new copy, Changes marks what was added and struck through. The new Copy tab lists every change with its before and after, ready to copy for a developer — and notices when the site already says the new text.",
+    ],
+  },
+  {
     date: "2026-11-21",
     title: "Select several pages, pins where you click, complete account pages",
     tag: "improved",

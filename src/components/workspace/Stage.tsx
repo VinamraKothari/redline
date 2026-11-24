@@ -15,6 +15,7 @@ import { CommentLayer } from "./layers/CommentLayer";
 import { DrawLayer } from "./layers/DrawLayer";
 import { CursorLayer } from "./layers/CursorLayer";
 import { CaptureLayer } from "./layers/CaptureLayer";
+import { TextLayer } from "./layers/TextLayer";
 import { Button, IconButton, Tip } from "@/components/ui/primitives";
 
 /** iframe src for a live page; `scripts=false` asks the proxy for a static render */
@@ -329,6 +330,8 @@ export function Stage() {
                 {/* "hide markup" hides drawings too — unless you're drawing right now */}
                 {(showComments || mode === "draw") && <DrawLayer geom={geom} />}
                 <InspectLayer />
+                {/* the Text tool: like Browse, the page itself gets the pointer (to place the caret); the layer only draws */}
+                <TextLayer geom={geom} />
                 {showComments && <CommentLayer geom={geom} />}
                 <CursorLayer />
                 <CaptureLayer geom={geom} />

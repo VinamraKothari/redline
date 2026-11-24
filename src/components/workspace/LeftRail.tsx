@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, EyeOff, HelpCircle, MessageCircle, MousePointer2, Pencil, Ruler } from "lucide-react";
+import { Eye, EyeOff, HelpCircle, MessageCircle, MousePointer2, Pencil, Ruler, Type } from "lucide-react";
 import { IconButton, Tip } from "@/components/ui/primitives";
 import { useStore, type Mode } from "@/lib/store";
 
@@ -9,6 +9,7 @@ const TOOLS: { mode: Mode; label: string; kbd: string; Icon: typeof MousePointer
   { mode: "comment", label: "Comment — click or drag a region", kbd: "C", Icon: MessageCircle },
   { mode: "draw", label: "Draw & annotate", kbd: "D", Icon: Pencil },
   { mode: "inspect", label: "Inspect type, colour & spacing", kbd: "I", Icon: Ruler },
+  { mode: "text", label: "Edit text — click any text to change it", kbd: "T", Icon: Type },
 ];
 
 export function LeftRail() {

@@ -50,6 +50,7 @@ function LinkRow({ label, hint, url, Icon }: { label: string; hint: string; url:
 export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const review = useStore((s) => s.review);
   const comments = useStore((s) => s.comments);
+  const textEdits = useStore((s) => s.textEdits);
   const viewport = useStore((s) => s.viewport);
   const toast = useStore((s) => s.toast);
   const [busy, setBusy] = useState(false);
@@ -103,7 +104,7 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       } catch (e) {
         toast(`Screenshots couldn't be rendered (${(e as Error).message}) — exporting the CSV without them.`, "error");
       }
-      download(`${safe}-jira.csv`, toJiraCsv(review!, comments, origin, crops), "text/csv;charset=utf-8");
+      download(`${safe}-jira.csv`, toJiraCsv(review!, comments, origin, crops, useStore.getState().textEdits), "text/csv;charset=utf-8");
       const n = Object.keys(crops).length;
       toast(n ? `Jira CSV downloaded with ${n} screenshot${n === 1 ? "" : "s"} attached.` : "Jira CSV downloaded.", "success");
     } finally {
@@ -129,16 +130,16 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
           <ExportTile
             Icon={FileSpreadsheet}
             label="Jira CSV"
-            hint={`${roots.length} issue${roots.length === 1 ? "" : "s"}`}
-            disabled={!roots.length || busy}
+            hint={`${roots.length + textEdits.length} issue${roots.length + textEdits.length === 1 ? "" : "s"}`}
+            disabled={(!roots.length && !textEdits.length) || busy}
             onClick={exportJira}
           />
           <ExportTile
             Icon={FileText}
             label="Markdown"
-            hint="Pending & resolved"
-            disabled={!roots.length}
-            onClick={() => download(`${safe}-feedback.md`, toMarkdown(review, comments, origin), "text/markdown")}
+            hint={textEdits.length ? "Comments & copy changes" : "Pending & resolved"}
+            disabled={!roots.length && !textEdits.length}
+            onClick={() => download(`${safe}-feedback.md`, toMarkdown(review, comments, origin, useStore.getState().textEdits), "text/markdown")}
           />
           <ExportTile Icon={ImageIcon} label="PNG" hint={`Full page at ${viewport}px, with markup`} disabled={busy} onClick={exportPng} />
         </div>

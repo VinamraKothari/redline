@@ -319,3 +319,38 @@ export const AUTHOR_COLORS = [
   "#e2342b", "#2c6cf6", "#1f9d55", "#d98b0b", "#8b5cf6",
   "#0e9aa7", "#d63384", "#6b7d2f", "#b05a1a", "#4a5568",
 ];
+
+/**
+ * A change to the copy of one text block on a reviewed page ("Copy" tab).
+ * Edits live only in Redline — the reviewed site is never touched — and are
+ * re-applied in the frame on every load. One edit per (review, selector):
+ * saving the same block again updates the row and keeps the `before_*`
+ * captured on the first save. Both htmls are sanitized inline HTML (see
+ * lib/text-edits/sanitize.ts); the `*_text` fields are their normalized text,
+ * which is what the reviewer compares with the live page to tell whether the
+ * site already ships the new copy.
+ */
+export interface TextEdit {
+  id: string;
+  review_id: string;
+  /** buildSelector() of the edited block */
+  selector: string;
+  /** human location, e.g. "the heading “Login”" (≤ 140 chars) */
+  label: string;
+  before_html: string;
+  before_text: string;
+  after_html: string;
+  after_text: string;
+  /** where the edit was made (informational; edits apply at every viewport) */
+  viewport_width: number;
+  status: TextEditStatus;
+  note: string | null;
+  author_id: string | null;
+  author_name: string;
+  author_color: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** What is stored. "Live on the site", "Out of date" and "Not found" are worked out in the frame on load. */
+export type TextEditStatus = "open" | "done";

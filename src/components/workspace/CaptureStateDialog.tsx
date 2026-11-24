@@ -7,6 +7,7 @@ import { Button, Dialog, DialogContent, Input } from "@/components/ui/primitives
 import { api } from "@/lib/api";
 import { frame } from "@/lib/frame/controller";
 import { serializeDocument } from "@/lib/frame/dom";
+import { withOriginal } from "@/lib/text-edits/sync";
 import { useStore } from "@/lib/store";
 
 /**
@@ -37,7 +38,8 @@ export function CaptureStateDialog({ open, onOpenChange }: { open: boolean; onOp
     if (!doc) return toast("The page hasn't loaded yet.", "error");
     setBusy(true);
     try {
-      const html = serializeDocument(doc, review.url);
+      // the page's own copy: copy edits belong to this page in Redline, not to the saved state
+      const html = withOriginal(() => serializeDocument(doc, review.url));
       const { review: r } = await api.createReview({
         project_id: review.project_id!,
         url: review.url.startsWith("upload://") ? undefined : review.url,

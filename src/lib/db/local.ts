@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DbAdapter } from "./adapter";
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, TextEdit, UserSettings } from "@/lib/types";
 import { isDevComment } from "@/lib/figma/dev";
 
 /**
@@ -13,6 +13,7 @@ interface Store {
   reviews: Record<string, Review>;
   comments: Record<string, Comment>;
   shapes: Record<string, Shape>;
+  textEdits: Record<string, TextEdit>;
   profiles: Record<string, Profile>;
   projects: Record<string, Project>;
   folders: Record<string, Folder>;
@@ -29,9 +30,16 @@ interface Store {
   audit: AuditEntry[];
 }
 const RANK: Record<Role, number> = { view: 0, edit: 1, admin: 2 };
-const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, profiles: {}, projects: {}, folders: {}, members: {}, invites: {}, reads: {}, siteSessions: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
+const empty = (): Store => ({ reviews: {}, comments: {}, shapes: {}, textEdits: {}, profiles: {}, projects: {}, folders: {}, members: {}, invites: {}, reads: {}, siteSessions: {}, settings: {}, subscriptions: {}, figmaRuns: [], admins: {}, grantCodes: {}, grantRedemptions: [], audit: [] });
 /** folder order: manual position first, then age */
 const byPosition = (a: Folder, b: Folder) => a.position - b.position || a.created_at.localeCompare(b.created_at);
+
+const byCreated = (a: { created_at: string }, b: { created_at: string }) => a.created_at.localeCompare(b.created_at);
+/** Stores a copy edit the way the unique (review_id, selector) constraint would: one row per block. */
+function putTextEdit(s: Store, e: TextEdit) {
+  for (const x of Object.values(s.textEdits)) if (x.id !== e.id && x.review_id === e.review_id && x.selector === e.selector) delete s.textEdits[x.id];
+  s.textEdits[e.id] = e;
+}
 
 const DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "redline.json");
@@ -209,6 +217,7 @@ const impl: DbAdapter = {
     // what they wrote in other people's projects stays, unattributed — the same as Postgres's `on delete set null`
     for (const c of Object.values(s2.comments)) if (c.author_id === userId) c.author_id = null;
     for (const sh of Object.values(s2.shapes)) if (sh.author_id === userId) sh.author_id = null;
+    for (const e of Object.values(s2.textEdits)) if (e.author_id === userId) e.author_id = null;
     delete s2.subscriptions[userId];
     delete s2.settings[userId];
     delete s2.admins[userId];
@@ -245,6 +254,7 @@ const impl: DbAdapter = {
       delete s.reviews[r.id];
       for (const c of Object.values(s.comments)) if (c.review_id === r.id) delete s.comments[c.id];
       for (const sh of Object.values(s.shapes)) if (sh.review_id === r.id) delete s.shapes[sh.id];
+      for (const e of Object.values(s.textEdits)) if (e.review_id === r.id) delete s.textEdits[e.id];
     }
     await persist();
   },
@@ -395,6 +405,7 @@ const impl: DbAdapter = {
     delete s.reviews[id];
     for (const c of Object.values(s.comments)) if (c.review_id === id) delete s.comments[c.id];
     for (const sh of Object.values(s.shapes)) if (sh.review_id === id) delete s.shapes[sh.id];
+    for (const e of Object.values(s.textEdits)) if (e.review_id === id) delete s.textEdits[e.id];
     await persist();
   },
 
@@ -474,6 +485,52 @@ const impl: DbAdapter = {
       }
     }
     await persist();
+  },
+
+  /* copy edits */
+  async listTextEdits(reviewId) {
+    const s = await load();
+    return Object.values(s.textEdits)
+      .filter((e) => e.review_id === reviewId)
+      .sort(byCreated);
+  },
+  async getTextEdit(id) {
+    return (await load()).textEdits[id] ?? null;
+  },
+  async getTextEditBySelector(reviewId, selector) {
+    const s = await load();
+    return Object.values(s.textEdits).find((e) => e.review_id === reviewId && e.selector === selector) ?? null;
+  },
+  async upsertTextEdit(e) {
+    const s = await load();
+    putTextEdit(s, e);
+    await persist();
+    return e;
+  },
+  async updateTextEdit(id, patch) {
+    const s = await load();
+    if (!s.textEdits[id]) return null;
+    s.textEdits[id] = { ...s.textEdits[id], ...patch, id, updated_at: patch.updated_at ?? new Date().toISOString() };
+    await persist();
+    return s.textEdits[id];
+  },
+  async deleteTextEdit(id) {
+    const s = await load();
+    delete s.textEdits[id];
+    await persist();
+  },
+  async deleteTextEdits(reviewId) {
+    const s = await load();
+    const gone = Object.values(s.textEdits).filter((e) => e.review_id === reviewId).sort(byCreated);
+    for (const e of gone) delete s.textEdits[e.id];
+    await persist();
+    return gone;
+  },
+  async insertTextEdits(rows) {
+    const s = await load();
+    for (const e of rows) putTextEdit(s, e);
+    await persist();
+    return rows;
   },
 
   async putSnapshot(p, html) {

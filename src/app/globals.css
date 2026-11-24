@@ -201,6 +201,38 @@ input:focus-visible, textarea:focus-visible { outline: none; }
   50% { box-shadow: 0 0 0 6px transparent; }
 }
 
+/* ─── Copy edits (Text tool, Copy tab) ─────────────────────────────────────
+   Their own accent — a teal green — so a copy change never reads as a
+   comment (red) or a developer comment (violet). */
+:root {
+  --copy: #0f9d76;
+  --copy-ink: #0b6b52;
+  --copy-soft: rgba(15, 157, 118, 0.12);
+  --copy-del: #c4321b;
+}
+@theme inline {
+  --color-copy: var(--copy);
+  --color-copy-ink: var(--copy-ink);
+  --color-copy-soft: var(--copy-soft);
+  --color-copy-del: var(--copy-del);
+}
+/* before → after in Redline's own UI, marked like the page's track changes */
+.rl-diff ins { text-decoration: none; background: color-mix(in srgb, var(--copy) 18%, transparent); color: var(--copy-ink); border-radius: 2px; box-shadow: 0 1px 0 var(--copy); }
+.rl-diff del { color: var(--copy-del); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* a hair of space between a deletion and what replaced it — only here, never on the page */
+.rl-diff del + ins { margin-left: 0.2em; }
+.rl-diff span[data-rl-fmt] { background: color-mix(in srgb, var(--copy) 12%, transparent); text-decoration: underline dotted var(--copy); }
+/* links in a quoted change are shown, not followed */
+.rl-diff a { color: inherit; text-decoration: underline; text-underline-offset: 2px; pointer-events: none; }
+@keyframes rl-flash {
+  0% { opacity: 0; box-shadow: 0 0 0 0 rgba(15, 157, 118, 0.45); }
+  12% { opacity: 1; }
+  70% { opacity: 1; box-shadow: 0 0 0 8px rgba(15, 157, 118, 0); }
+  100% { opacity: 0; box-shadow: 0 0 0 8px rgba(15, 157, 118, 0); }
+}
+.rl-flash { animation: rl-flash 1.6s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .rl-flash { animation-duration: 2.4s; box-shadow: none; } }
+
 /* dashed measurement guides */
 .measure-line { stroke: var(--red); stroke-width: 1; shape-rendering: crispEdges; }
 .measure-ext { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 3; shape-rendering: crispEdges; opacity: .8; }

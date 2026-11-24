@@ -4,7 +4,7 @@ import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { api } from "./api";
 import { supabaseBrowser } from "./auth/client";
 import { useStore } from "./store";
-import type { Comment, Shape, Viewer } from "./types";
+import type { Comment, Shape, TextEdit, Viewer } from "./types";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./supabase-config";
 
 /**
@@ -68,9 +68,10 @@ function startPolling(reviewId: string): RealtimeHandle {
   const tick = async () => {
     if (!alive) return;
     try {
-      const [{ comments }, { shapes }] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId)]);
+      const [{ comments }, { shapes }, copy] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId), listTextEdits(reviewId)]);
       mergeComments(comments);
       mergeShapes(shapes);
+      if (copy) mergeTextEdits(copy);
     } catch {
       /* offline */
     }
@@ -101,6 +102,15 @@ function startLive(sb: SupabaseClient, reviewId: string): RealtimeHandle {
         if (old.id) st().removeShape(old.id);
       } else {
         st().upsertShape(payload.new as Shape);
+      }
+    })
+    // copy edits (migration 010): without the table nothing is published and this stays quiet
+    .on("postgres_changes", { event: "*", schema: "public", table: "text_edits", filter: `review_id=eq.${reviewId}` }, (payload) => {
+      if (payload.eventType === "DELETE") {
+        const old = payload.old as Partial<TextEdit>;
+        if (old.id) st().removeTextEdit(old.id);
+      } else {
+        st().upsertTextEdit(payload.new as TextEdit);
       }
     })
     .on("broadcast", { event: "review" }, ({ payload }) => {
@@ -147,9 +157,10 @@ function startLive(sb: SupabaseClient, reviewId: string): RealtimeHandle {
   // which is what we rely on; also do a periodic reconcile to be safe.
   const reconcile = setInterval(async () => {
     try {
-      const [{ comments }, { shapes }] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId)]);
+      const [{ comments }, { shapes }, copy] = await Promise.all([api.listComments(reviewId), api.listShapes(reviewId), listTextEdits(reviewId)]);
       mergeComments(comments);
       mergeShapes(shapes);
+      if (copy) mergeTextEdits(copy);
     } catch {
       /* ignore */
     }
@@ -214,4 +225,21 @@ function mergeShapes(shapes: Shape[]) {
   const cur = st.shapes;
   if (cur.length === shapes.length && cur.every((s, i) => s.id === shapes[i].id && s.updated_at === shapes[i].updated_at)) return;
   st.set({ shapes: shapes.sort((a, b) => a.z - b.z) });
+}
+
+/** Copy edits are a newer feature: if their endpoint fails, comments and drawings still sync. */
+async function listTextEdits(reviewId: string): Promise<TextEdit[] | null> {
+  try {
+    return (await api.textEdits.list(reviewId)).edits;
+  } catch {
+    return null;
+  }
+}
+
+function mergeTextEdits(edits: TextEdit[]) {
+  const st = useStore.getState();
+  const cur = st.textEdits;
+  const sorted = [...edits].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (cur.length === sorted.length && cur.every((e, i) => e.id === sorted[i].id && e.updated_at === sorted[i].updated_at)) return;
+  st.setTextEdits(sorted);
 }

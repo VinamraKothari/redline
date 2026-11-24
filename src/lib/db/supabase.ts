@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DbAdapter } from "./adapter";
 import { supabaseSecret } from "./index";
 import { SUPABASE_URL } from "@/lib/supabase-config";
-import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, UserSettings } from "@/lib/types";
+import type { AdminUserRow, AuditEntry, Comment, Folder, GrantCode, OpenThreadCount, Profile, Project, ProjectInvite, ProjectMember, Review, Role, Shape, SiteSession, StoredSiteCookies, Subscription, TextEdit, UserSettings } from "@/lib/types";
 import { isDevComment } from "@/lib/figma/dev";
 
 const BUCKET = "snapshots";
@@ -18,6 +18,21 @@ const FOLDERS_NOT_SET_UP = "Folders are not set up yet — run migration 008 fir
 /** The `site_sessions` table (migration 009) isn't there yet. */
 const missingSiteSessions = (message: string) => /(relation|table) ["']?public\.site_sessions["']?|site_sessions.*schema cache/i.test(message);
 let warnedSiteSessions = false;
+/** The `text_edits` table (migration 010) isn't there yet. As narrow as `missingFolders`. */
+const missingTextEdits = (message: string) => /(relation|table) ["']?public\.text_edits["']?|text_edits.*schema cache/i.test(message);
+const TEXT_EDITS_NOT_SET_UP = "Text edits are not set up yet — run migration 010 first.";
+/** Reads see "no edits" until migration 010 has run; writes say what to do. */
+function readTextEdits<T>(res: { data: T | null; error: { message: string } | null }, none: T): T {
+  if (res.error) {
+    if (missingTextEdits(res.error.message)) return none;
+    throw new Error(res.error.message);
+  }
+  return res.data ?? none;
+}
+function writeTextEdits<T>(res: { data: T | null; error: { message: string } | null }): T {
+  if (res.error) throw new Error(missingTextEdits(res.error.message) ? TEXT_EDITS_NOT_SET_UP : res.error.message);
+  return res.data as T;
+}
 
 let client: SupabaseClient | null = null;
 function sb(): SupabaseClient {
@@ -444,6 +459,44 @@ export const supabaseDb: DbAdapter = {
     let q = sb().from("shapes").delete().eq("review_id", reviewId);
     if (viewport !== null) q = q.eq("viewport_width", viewport);
     must(await q);
+  },
+
+  /* copy edits — table from migration 010 */
+  async listTextEdits(reviewId) {
+    return readTextEdits(await sb().from("text_edits").select().eq("review_id", reviewId).order("created_at", { ascending: true }).returns<TextEdit[]>(), []);
+  },
+  async getTextEdit(id) {
+    return readTextEdits(await sb().from("text_edits").select().eq("id", id).maybeSingle<TextEdit>(), null);
+  },
+  async getTextEditBySelector(reviewId, selector) {
+    return readTextEdits(await sb().from("text_edits").select().eq("review_id", reviewId).eq("selector", selector).maybeSingle<TextEdit>(), null);
+  },
+  async upsertTextEdit(e) {
+    // a row of the same block under another id (a concurrent first save) gives way, as the unique constraint demands
+    writeTextEdits(await sb().from("text_edits").delete().eq("review_id", e.review_id).eq("selector", e.selector).neq("id", e.id));
+    return writeTextEdits(await sb().from("text_edits").upsert(e).select().single<TextEdit>());
+  },
+  async updateTextEdit(id, patch) {
+    return writeTextEdits(
+      await sb()
+        .from("text_edits")
+        .update({ ...patch, updated_at: patch.updated_at ?? new Date().toISOString() })
+        .eq("id", id)
+        .select()
+        .maybeSingle<TextEdit>(),
+    );
+  },
+  async deleteTextEdit(id) {
+    writeTextEdits(await sb().from("text_edits").delete().eq("id", id));
+  },
+  async deleteTextEdits(reviewId) {
+    const gone = writeTextEdits(await sb().from("text_edits").delete().eq("review_id", reviewId).select().returns<TextEdit[]>()) ?? [];
+    return gone.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
+  async insertTextEdits(rows) {
+    const out: TextEdit[] = [];
+    for (const e of rows) out.push(await this.upsertTextEdit(e));
+    return out;
   },
 
   async putSnapshot(p, html) {

@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Camera, ChevronDown, Code2, GitCompareArrows, KeyRound, LogOut, Maximize2, Minus, Monitor, Plus, Share2, Smartphone, Snowflake, Sun, Tablet, RotateCw } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { AccountMenu } from "@/components/home/AccountMenu";
-import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tip, Button } from "@/components/ui/primitives";
-import { useStore } from "@/lib/store";
+import { Avatar, IconButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Segmented, Tip, Button } from "@/components/ui/primitives";
+import { useStore, type TextView } from "@/lib/store";
+import { withOriginal } from "@/lib/text-edits/sync";
 import { VIEWPORTS } from "@/lib/types";
 import { api } from "@/lib/api";
 import { frame } from "@/lib/frame/controller";
@@ -93,7 +94,8 @@ export function TopBar() {
     try {
       st.toast("Capturing the page…");
       await frame().warmUp();
-      const html = serializeDocument(doc, review.url);
+      // copy edits stay in Redline: the frozen page is the site's own copy
+      const html = withOriginal(() => serializeDocument(doc, review.url));
       const { review: r } = await api.freeze(review.id, html);
       set({ review: r });
       RealtimeContext.current?.announceReview();
@@ -108,10 +110,10 @@ export function TopBar() {
   return (
     <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-paper px-3">
       <Logo compact />
-      <div className="mx-1 h-5 w-px bg-line" />
+      <div className="mx-1 h-5 w-px bg-line max-sm:hidden" />
 
-      {/* title + url */}
-      <div className="flex min-w-0 items-center gap-2">
+      {/* title + url (on a phone the title keeps some room before the controls) */}
+      <div className="flex min-w-0 items-center gap-2 max-sm:min-w-[84px] max-sm:shrink">
         <PageSwitcher />
         {review && !review.url.startsWith("upload://") && (
           <a
@@ -137,6 +139,8 @@ export function TopBar() {
 
       <div className="flex-1" />
 
+      <TextViewSwitch />
+
       {/* viewport */}
       <Menu>
         <MenuTrigger asChild>
@@ -146,7 +150,7 @@ export function TopBar() {
             title="Viewport width"
           >
             <VpIcon size={14} className="text-ink-2" />
-            <span className="mono">{viewport}</span>
+            <span className="mono max-sm:hidden">{viewport}</span>
             <ChevronDown size={13} className="text-ink-3" />
           </button>
         </MenuTrigger>
@@ -188,7 +192,7 @@ export function TopBar() {
       </div>
 
       <Tip label="Reload page" kbd="R" side="bottom">
-        <IconButton onClick={() => window.dispatchEvent(new CustomEvent("redline:reload"))}>
+        <IconButton className="max-sm:hidden" onClick={() => window.dispatchEvent(new CustomEvent("redline:reload"))}>
           <RotateCw size={15} />
         </IconButton>
       </Tip>
@@ -202,6 +206,7 @@ export function TopBar() {
           <IconButton
             active={!scripts}
             aria-label={scripts ? "Site scripts: on" : "Site scripts: off"}
+            className="max-sm:hidden"
             onClick={() => {
               set({ scripts: !scripts, frameReady: false, frameError: null, navigatedAway: null, hover: null, selected: null, measureTarget: null });
             }}
@@ -221,11 +226,11 @@ export function TopBar() {
         </div>
       )}
 
-      <div className="mx-1 h-5 w-px bg-line" />
+      <div className="mx-1 h-5 w-px bg-line max-sm:hidden" />
 
       {!viewOnly && review && review.mode !== "upload" && (
         <Tip label={review.mode === "frozen" ? "Unfreeze — go back to the live page" : "Freeze — capture this exact version for everyone"} kbd="⇧F" side="bottom">
-          <IconButton onClick={toggleFreeze} disabled={freezing} active={review.mode === "frozen"}>
+          <IconButton className="max-sm:hidden" onClick={toggleFreeze} disabled={freezing} active={review.mode === "frozen"}>
             {review.mode === "frozen" ? <Sun size={15} /> : <Snowflake size={15} />}
           </IconButton>
         </Tip>
@@ -233,7 +238,7 @@ export function TopBar() {
 
       {!viewOnly && review && (
         <Tip label="Compare with Figma — every difference becomes a developer comment" kbd="⇧G" side="bottom">
-          <IconButton onClick={() => setFigmaOpen(true)} aria-label="Compare with Figma">
+          <IconButton className="max-sm:hidden" onClick={() => setFigmaOpen(true)} aria-label="Compare with Figma">
             <GitCompareArrows size={15} />
           </IconButton>
         </Tip>
@@ -241,21 +246,21 @@ export function TopBar() {
 
       {!viewOnly && review && (
         <Tip label="Save this state as a new page — open drawer, dialog or locked menu, kept for everyone" kbd="⇧P" side="bottom">
-          <IconButton onClick={() => setCaptureState(true)} aria-label="Save this state as a new page">
+          <IconButton className="max-sm:hidden" onClick={() => setCaptureState(true)} aria-label="Save this state as a new page">
             <Camera size={15} />
           </IconButton>
         </Tip>
       )}
 
       <Tip label="Full screen preview" kbd="F" side="bottom">
-        <IconButton onClick={() => set({ fullscreen: true })}>
+        <IconButton className="max-sm:hidden" onClick={() => set({ fullscreen: true })}>
           <Maximize2 size={15} />
         </IconButton>
       </Tip>
 
       <Tip label="Share & export" kbd="⇧S" side="bottom">
-        <Button variant="primary" onClick={() => setShare(true)} className="ml-1">
-          <Share2 size={13} /> Share
+        <Button variant="primary" onClick={() => setShare(true)} className="ml-1 max-sm:px-2" aria-label="Share">
+          <Share2 size={13} /> <span className="max-sm:hidden">Share</span>
         </Button>
       </Tip>
       <ShareDialog open={share} onOpenChange={setShare} />
@@ -265,6 +270,64 @@ export function TopBar() {
         <AccountMenu size={26} />
       </div>
     </header>
+  );
+}
+
+const VIEW_OPTIONS: { value: TextView; label: string; title: string }[] = [
+  { value: "original", label: "Original", title: "The page as it is — copy changes hidden" },
+  { value: "edited", label: "Edited", title: "The new copy, exactly as the site would show it" },
+  { value: "changes", label: "Changes", title: "Track changes: new copy highlighted, removed copy struck through" },
+];
+
+/**
+ * Original · Edited · Changes — how copy edits show on the page. Visible once
+ * the page has copy changes, or while the Text tool is on.
+ */
+function TextViewSwitch() {
+  const count = useStore((s) => s.textEdits.length);
+  const mode = useStore((s) => s.mode);
+  const view = useStore((s) => s.textView);
+  const setView = useStore((s) => s.setTextView);
+  if (!count && mode !== "text") return null;
+  return (
+    <div className="flex items-center gap-2" data-text-view={view}>
+      <span className="hidden items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2 lg:inline-flex" aria-live="polite">
+        <span className="h-1.5 w-1.5 rounded-full bg-copy" />
+        <span className="num">{count}</span> copy change{count === 1 ? "" : "s"}
+      </span>
+      <Tip label="How copy changes show on the page" kbd="⇧T" side="bottom">
+        <div role="group" aria-label="Copy view" className="hidden md:block">
+          <Segmented value={view} onChange={setView} options={VIEW_OPTIONS} />
+        </div>
+      </Tip>
+      {/* narrow screens: the active view, the others in a menu — the page title keeps its room */}
+      <Menu>
+        <MenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Copy view: ${VIEW_OPTIONS.find((o) => o.value === view)?.label}`}
+            className="flex h-8 items-center gap-1 rounded-md px-1.5 text-[12px] font-medium text-ink hover:bg-hover md:hidden"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-copy" />
+            {VIEW_OPTIONS.find((o) => o.value === view)?.label}
+            <ChevronDown size={12} className="text-ink-3" />
+          </button>
+        </MenuTrigger>
+        <MenuContent align="end">
+          <MenuLabel>Copy changes ({count})</MenuLabel>
+          {VIEW_OPTIONS.map((o) => (
+            <MenuItem key={o.value} onSelect={() => setView(o.value)}>
+              <span className="w-3 text-copy">{view === o.value ? "•" : ""}</span>
+              <span className="flex flex-col">
+                <span>{o.label}</span>
+                <span className="text-[11px] text-ink-3">{o.title}</span>
+              </span>
+            </MenuItem>
+          ))}
+        </MenuContent>
+      </Menu>
+      <div className="mx-0.5 h-5 w-px bg-line max-sm:hidden" />
+    </div>
   );
 }
 

@@ -87,6 +87,8 @@ export function Toasts() {
               ["Comment", "C"],
               ["Draw", "D"],
               ["Inspect", "I"],
+              ["Edit text on the page", "T"],
+              ["Copy view: original / edited / changes", "⇧ T"],
               ["Lock hover state (menus, tooltips)", "H"],
               ["Full-screen preview", "F"],
               ["Freeze / unfreeze the page", "⇧ F"],
@@ -106,10 +108,12 @@ export function Toasts() {
               ["Measure to another element", "select, then hold Alt"],
               ["Zoom", "⌘ + / ⌘ −  or  Ctrl + scroll"],
               ["Fit / 100%", "⌘ 0 / ⌘ 1"],
-              ["Undo / redo drawing", "⌘ Z / ⌘ ⇧ Z"],
+              ["Undo / redo drawing or copy change", "⌘ Z / ⌘ ⇧ Z"],
               ["Draw tools", "S P H L A R O T"],
               ["Region comment", "drag in comment mode"],
               ["Send comment / new line", "Enter / ⇧ Enter"],
+              ["Save text / line break / discard", "Enter / ⇧ Enter / Esc"],
+              ["Bold / italic / underline / link", "⌘ B / I / U / K"],
             ].map(([k, v]) => (
               <div key={k} className="flex items-center justify-between gap-3 border-b border-line py-1">
                 <span className="text-ink-2">{k}</span>

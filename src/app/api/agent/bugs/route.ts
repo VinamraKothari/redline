@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/agent/bugs — every thread in the agent's project, with full context.
+ * GET /api/agent/bugs — every thread and copy edit in the agent's project, with full context.
  *   ?status=open (default) | resolved | all
  *   ?review=<review id>   only one page
  * Bearer-token auth; read-only. See docs/agent-api.md.
@@ -24,7 +24,12 @@ export const GET = guarded(async (req: NextRequest) => {
   const [reviews, folders] = await Promise.all([d.listReviews(projectId), d.listFolders(projectId)]);
   const picked = only ? reviews.filter((r) => r.id === only) : reviews;
   if (only && !picked.length) throw new HttpError(404, "No such page in this project.");
-  const withComments = await Promise.all(picked.map(async (review) => ({ review, comments: await d.listComments(review.id) })));
+  const withComments = await Promise.all(
+    picked.map(async (review) => {
+      const [comments, textEdits] = await Promise.all([d.listComments(review.id), d.listTextEdits(review.id)]);
+      return { review, comments, textEdits };
+    }),
+  );
 
   const threads = agentThreads(requestOrigin(req), withComments, folders).filter((t) => status === "all" || t.status === status);
   return Response.json(

@@ -6,6 +6,8 @@ import { showsAt } from "@/lib/viewports";
 import { stopRecording } from "@/lib/recorder";
 import { frame } from "@/lib/frame/controller";
 import { VIEWPORTS } from "@/lib/types";
+import { cycleTextView } from "@/lib/text-edits/useTextEdits";
+import { copyStepFirst } from "@/lib/text-edits/actions";
 
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
@@ -43,7 +45,15 @@ export function useShortcuts() {
 
       if (mod && k === "z") {
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent(e.shiftKey ? "redline:redo" : "redline:undo"));
+        // copy changes in the Text tool, drawings in the Draw tool; elsewhere whichever was done last
+        const dir = e.shiftKey ? "redo" : "undo";
+        const copy = st.mode === "text" || (st.mode !== "draw" && copyStepFirst(dir));
+        window.dispatchEvent(new CustomEvent(`redline:${copy ? "text-" : ""}${dir}`));
+        return;
+      }
+      if (e.ctrlKey && !e.metaKey && k === "y" && (st.mode === "text" || (st.mode !== "draw" && copyStepFirst("redo")))) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("redline:text-redo"));
         return;
       }
       if (mod && (k === "=" || k === "+")) {
@@ -88,6 +98,12 @@ export function useShortcuts() {
       // account settings are personal, so the comma works in view-only mode too
       if (k === "," && !e.shiftKey && !e.altKey) {
         window.dispatchEvent(new CustomEvent("redline:settings"));
+        return;
+      }
+
+      // Original · Edited · Changes — viewers too
+      if (e.shiftKey && k === "t" && !e.altKey) {
+        cycleTextView();
         return;
       }
 
@@ -165,6 +181,7 @@ export function useShortcuts() {
           break;
         case "t":
           if (st.mode === "draw") st.set({ tool: "text" });
+          else st.setMode("text");
           break;
         case "s":
           if (st.mode === "draw") st.set({ tool: "select" });
